@@ -43,6 +43,8 @@ interface RoomStore extends PersistedState {
   gridSize: number;
   showGrid3D: boolean;
   personView: { x: number; z: number; rotationY: number; pitch: number } | null;
+  /** True when the user is in placement mode (clicking on the 2D map to drop a person). */
+  personPlacing: boolean;
   savedPlans: SavedPlan[];
   persistError: string | null;
 
@@ -91,6 +93,7 @@ interface RoomStore extends PersistedState {
   setGridSize: (n: number) => void;
   setShowGrid3D: (v: boolean) => void;
   setPersonView: (v: { x: number; z: number; rotationY: number; pitch: number } | null) => void;
+  setPersonPlacing: (v: boolean) => void;
   resetAll: () => void;
   loadSample: () => void;
 
@@ -350,6 +353,7 @@ export const useRoomStore = create<RoomStore>()(
     gridSize: 0.1,
     showGrid3D: true,
     personView: null,
+    personPlacing: false,
     savedPlans: loadSavedPlans(),
     persistError: null,
 
@@ -573,6 +577,7 @@ export const useRoomStore = create<RoomStore>()(
     setGridSize: (n) => set({ gridSize: n }),
     setShowGrid3D: (v) => set({ showGrid3D: v }),
     setPersonView: (v) => set({ personView: v }),
+    setPersonPlacing: (v) => set({ personPlacing: v }),
     resetAll: () =>
       set({
         floor: DEFAULT_FLOOR,
@@ -581,6 +586,7 @@ export const useRoomStore = create<RoomStore>()(
         editorMode: 'plan',
         tool: 'outline',
         personView: null,
+        personPlacing: false,
       }),
 
     loadSample: () => {
@@ -592,6 +598,7 @@ export const useRoomStore = create<RoomStore>()(
         editorMode: 'arrange',
         tool: 'select',
         personView: null,
+        personPlacing: false,
       });
     },
 
@@ -633,6 +640,7 @@ export const useRoomStore = create<RoomStore>()(
         // The previous person-view position belongs to the old plan; clear it
         // so the user doesn't end up stuck outside walls of the new one.
         personView: null,
+        personPlacing: false,
       });
     },
 

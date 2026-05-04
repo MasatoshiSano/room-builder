@@ -1,5 +1,4 @@
 import { useRoomStore } from '../store/useRoomStore';
-import { bbox, pointInPolygon } from '../lib/geometry';
 
 const GRID_VALUES = [0.05, 0.1, 0.25, 0.5];
 
@@ -12,6 +11,8 @@ export function HeaderControls() {
   const setShowGrid3D = useRoomStore((s) => s.setShowGrid3D);
   const personView = useRoomStore((s) => s.personView);
   const setPersonView = useRoomStore((s) => s.setPersonView);
+  const personPlacing = useRoomStore((s) => s.personPlacing);
+  const setPersonPlacing = useRoomStore((s) => s.setPersonPlacing);
   const floor = useRoomStore((s) => s.floor);
   const isOutlineClosed = floor.outline.length >= 3;
 
@@ -68,23 +69,29 @@ export function HeaderControls() {
         {isOutlineClosed && (
           <button
             type="button"
-            className={`seg-btn${personView ? ' is-active' : ''}`}
+            className={`seg-btn${personView || personPlacing ? ' is-active' : ''}`}
             role="switch"
-            aria-checked={!!personView}
-            title="人視点モード切替"
+            aria-checked={!!personView || personPlacing}
+            title={
+              personView
+                ? '人視点を解除'
+                : personPlacing
+                  ? '配置モード解除'
+                  : '人視点を配置 (2Dマップでクリック→ドラッグして向きを決定)'
+            }
             onClick={() => {
               if (personView) {
                 setPersonView(null);
+                setPersonPlacing(false);
                 return;
               }
-              const b = bbox(floor.outline);
-              const cx = (b.minX + b.maxX) / 2;
-              const cz = (b.minZ + b.maxZ) / 2;
-              const center = { x: cx, z: cz };
-              const inside = pointInPolygon(center, floor.outline);
-              const start = inside ? center : floor.outline[0] ?? { x: 0, z: 0 };
-              setPersonView({ x: start.x, z: start.z, rotationY: 0, pitch: 0 });
-              setEditorMode('arrange');
+              if (personPlacing) {
+                setPersonPlacing(false);
+                return;
+              }
+              // Enter placement mode in the 2D editor.
+              setEditorMode('plan');
+              setPersonPlacing(true);
             }}
           >
             👤 人視点

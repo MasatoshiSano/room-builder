@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 import {
-  bbox,
   closestOnSegment,
   distance,
   innerEdges,
@@ -56,7 +55,24 @@ export function FloorPlanEditor() {
   const setPersonView = useRoomStore((s) => s.setPersonView);
   const setEditorMode = useRoomStore((s) => s.setEditorMode);
 
-  const [personMode, setPersonMode] = useState(false);
+  const personPlacing = useRoomStore((s) => s.personPlacing);
+  const setPersonPlacing = useRoomStore((s) => s.setPersonPlacing);
+  /**
+   * In-progress person-view placement (active during a single drag while
+   * personPlacing). `start` is the chosen world position; `current` is the
+   * pointer's current world position used to derive the direction arrow.
+   * Backed by a ref so synchronous pointerdown→move→up sequences see the
+   * latest value (React state would lag a render behind).
+   */
+  const placementRef = useRef<{ start: Vec2; current: Vec2 } | null>(null);
+  const [personPlacement, setPersonPlacement] = useState<{
+    start: Vec2;
+    current: Vec2;
+  } | null>(null);
+  const updatePlacement = (next: { start: Vec2; current: Vec2 } | null) => {
+    placementRef.current = next;
+    setPersonPlacement(next);
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -96,10 +112,15 @@ export function FloorPlanEditor() {
         e.preventDefault();
         setPendingInnerStart(null);
       }
+      if (personPlacing) {
+        e.preventDefault();
+        setPersonPlacing(false);
+        setPersonPlacement(null);
+      }
     };
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, [tool, pendingInnerStart]);
+  }, [tool, pendingInnerStart, personPlacing, setPersonPlacing]);
 
   const outlineForView = useMemo(
     () => (floor.outline.length > 0 ? floor.outline : DEFAULT_BOX),
@@ -556,25 +577,17 @@ export function FloorPlanEditor() {
         {isOutlineClosed && (
           <ToolButton
             label="👤 人視点"
-            active={personMode || !!personView}
+            active={personPlacing || !!personView}
             onClick={() => {
               if (personView) {
                 setPersonView(null);
-                setPersonMode(false);
+                setPersonPlacing(false);
+                setPersonPlacement(null);
                 return;
               }
-              // Drop person at the room center (or last vertex if center is outside).
-              const b = bbox(floor.outline);
-              const cx = (b.minX + b.maxX) / 2;
-              const cz = (b.minZ + b.maxZ) / 2;
-              const center = { x: cx, z: cz };
-              const inside = pointInPolygon(center, floor.outline);
-              const start = inside
-                ? center
-                : floor.outline[0] ?? { x: 0, z: 0 };
-              setPersonView({ x: start.x, z: start.z, rotationY: 0, pitch: 0 });
-              setEditorMode('arrange');
-              setPersonMode(false);
+              // Enter placement mode: user clicks a position and drags to set facing.
+              setPersonPlacing(true);
+              setPersonPlacement(null);
             }}
           />
         )}
@@ -659,7 +672,7 @@ export function FloorPlanEditor() {
         className="floor-editor-svg"
         width={size.width}
         height={size.height}
-        style={{ touchAction: 'none', cursor: personMode ? 'crosshair' : undefined }}
+        style={{ touchAction: 'none', cursor: personPlacing ? 'crosshair' : undefined }}
         onPointerDown={handleSvgPointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1033,8 +1046,8 @@ export function FloorPlanEditor() {
           </text>
         )}
 
-        {/* Capture overlay: intercepts all clicks when personMode is active */}
-        {personMode && (
+        {/* Capture overlay: intercepts pointer events while placing a person */}
+        {personPlacing && (
           <rect
             x={0}
             y={0}
@@ -1045,18 +1058,86 @@ export function FloorPlanEditor() {
               if (e.button !== 0) return;
               e.stopPropagation();
               const p = getSvgPoint(e);
-              const prev = personView;
-              setPersonView({
-                x: p.x,
-                z: p.z,
-                rotationY: prev?.rotationY ?? 0,
-                pitch: 0,
-              });
+              updatePlacement({ start: p, current: p });
+              (e.currentTarget as Element).setPointerCapture(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              const cur = placementRef.current;
+              if (!cur) return;
+              e.stopPropagation();
+              const p = getSvgPoint(e);
+              updatePlacement({ ...cur, current: p });
+            }}
+            onPointerUp={(e) => {
+              const cur = placementRef.current;
+              if (!cur) return;
+              e.stopPropagation();
+              const { start, current } = cur;
+              if (!pointInPolygon(start, floor.outline)) {
+                updatePlacement(null);
+                return;
+              }
+              const dx = current.x - start.x;
+              const dz = current.z - start.z;
+              const dragLen = Math.hypot(dx, dz);
+              const rotationY = dragLen > 0.05 ? Math.atan2(dx, dz) : 0;
+              setPersonView({ x: start.x, z: start.z, rotationY, pitch: 0 });
+              updatePlacement(null);
+              setPersonPlacing(false);
               setEditorMode('arrange');
-              setPersonMode(false);
+            }}
+            onPointerCancel={() => {
+              updatePlacement(null);
             }}
           />
         )}
+
+        {/* Placement preview: arrow from start position to cursor */}
+        {personPlacing && personPlacement && (() => {
+          const valid = pointInPolygon(personPlacement.start, floor.outline);
+          const color = valid ? '#f59e0b' : '#dc2626';
+          const a = transform.toScreen(personPlacement.start);
+          const b = transform.toScreen(personPlacement.current);
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy);
+          const showArrow = len > 6;
+          return (
+            <g pointerEvents="none">
+              <circle cx={a.x} cy={a.y} r={9} fill={color} stroke="white" strokeWidth={2} />
+              {showArrow && (
+                <>
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke={color}
+                    strokeWidth={3}
+                  />
+                  {(() => {
+                    const ux = dx / len;
+                    const uy = dy / len;
+                    const headLen = 12;
+                    const headWide = 7;
+                    const tipX = b.x;
+                    const tipY = b.y;
+                    const baseX = b.x - ux * headLen;
+                    const baseY = b.y - uy * headLen;
+                    const px = -uy;
+                    const py = ux;
+                    return (
+                      <polygon
+                        points={`${tipX},${tipY} ${baseX + px * headWide},${baseY + py * headWide} ${baseX - px * headWide},${baseY - py * headWide}`}
+                        fill={color}
+                      />
+                    );
+                  })()}
+                </>
+              )}
+            </g>
+          );
+        })()}
 
         {/* Person view marker */}
         {personView && (() => {
@@ -1115,7 +1196,8 @@ export function FloorPlanEditor() {
         {tool === 'window' && '外壁をクリックしてください。'}
         {tool === 'select' &&
           '頂点・壁・開口・家具をドラッグで編集。背景ドラッグでパン、ホイールでズーム。'}
-        {personMode && '床面をクリックして人の視点位置を指定してください。'}
+        {personPlacing &&
+          '人視点の配置: 床面をクリックして開始位置を決め、そのままドラッグして向きを示し、離すと 3D 人視点に切り替わります。'}
       </p>
     </div>
   );
