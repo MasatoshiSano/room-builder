@@ -80,10 +80,23 @@ export function precomputeEdges(floor: FloorPlan): PrecomputedEdges {
   };
 }
 
+/** Returns true if two furniture items overlap (considering rotation). */
+export function furnituresOverlap(a: Furniture, b: Furniture): boolean {
+  const ca = getFurnitureCorners(a);
+  const cb = getFurnitureCorners(b);
+  // Check edges of a against rect b, and edges of b against rect a.
+  for (let i = 0; i < 4; i++) {
+    if (rectIntersectsSegment(cb, ca[i], ca[(i + 1) % 4])) return true;
+    if (rectIntersectsSegment(ca, cb[i], cb[(i + 1) % 4])) return true;
+  }
+  return false;
+}
+
 export function isFurniturePlacementValid(
   candidate: Furniture,
   floor: FloorPlan,
   edges?: PrecomputedEdges,
+  others?: Furniture[],
 ): boolean {
   if (floor.outline.length < 3) return true;
   const corners = getFurnitureCorners(candidate);
@@ -98,6 +111,11 @@ export function isFurniturePlacementValid(
   }
   for (const e of inner) {
     if (rectIntersectsSegment(corners, e.start, e.end)) return false;
+  }
+  if (others) {
+    for (const other of others) {
+      if (furnituresOverlap(candidate, other)) return false;
+    }
   }
   return true;
 }

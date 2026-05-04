@@ -21,6 +21,7 @@ type DragState =
       start: Vec2;
       orig: Furniture;
       edges: PrecomputedEdges;
+      others: Furniture[];
     }
   | {
       kind: 'resize';
@@ -29,6 +30,7 @@ type DragState =
       anchor: Vec2;
       orig: Furniture;
       edges: PrecomputedEdges;
+      others: Furniture[];
     };
 
 const SCALE_HANDLE = 7;
@@ -53,6 +55,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
       start: p,
       orig: { ...f },
       edges: precomputeEdges(floor),
+      others: furniture.filter((o) => o.id !== f.id),
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -80,6 +83,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
       anchor: anchorWorld,
       orig: { ...f },
       edges: precomputeEdges(floor),
+      others: furniture.filter((o) => o.id !== f.id),
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -99,7 +103,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
         z: newZ,
       });
       const candidate = { ...d.orig, x: newX, z: newZ };
-      const valid = isFurniturePlacementValid(candidate, floor, d.edges);
+      const valid = isFurniturePlacementValid(candidate, floor, d.edges, d.others);
       setDragInvalidId(valid ? null : d.id);
       return;
     }
@@ -130,7 +134,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
         x: cxWorld,
         z: czWorld,
       };
-      const valid = isFurniturePlacementValid(candidate, floor, d.edges);
+      const valid = isFurniturePlacementValid(candidate, floor, d.edges, d.others);
       setDragInvalidId(valid ? null : d.id);
     }
   };
@@ -142,7 +146,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
     const current = useRoomStore
       .getState()
       .furniture.find((x) => x.id === d.id);
-    if (current && !isFurniturePlacementValid(current, floor, d.edges)) {
+    if (current && !isFurniturePlacementValid(current, floor, d.edges, d.others)) {
       if (d.kind === 'move') {
         updateFurniture(d.id, { x: d.orig.x, z: d.orig.z });
       } else {

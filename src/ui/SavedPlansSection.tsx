@@ -4,6 +4,7 @@ import { useRoomStore } from '../store/useRoomStore';
 export function SavedPlansSection() {
   const savedPlans = useRoomStore((s) => s.savedPlans);
   const savePlan = useRoomStore((s) => s.savePlan);
+  const overwritePlan = useRoomStore((s) => s.overwritePlan);
   const loadPlan = useRoomStore((s) => s.loadPlan);
   const deletePlan = useRoomStore((s) => s.deletePlan);
   const renamePlan = useRoomStore((s) => s.renamePlan);
@@ -96,6 +97,19 @@ export function SavedPlansSection() {
                     </button>
                   )}
                   <div className="saved-actions">
+                    <button
+                      type="button"
+                      className="qbtn"
+                      onClick={() => {
+                        const safeName = String(p.name).replace(/\s+/g, ' ').slice(0, 40);
+                        if (confirm(`「${safeName}」に上書き保存しますか？`)) {
+                          overwritePlan(p.id);
+                        }
+                      }}
+                      title="上書き保存"
+                    >
+                      ↑
+                    </button>
                     <button
                       type="button"
                       className="qbtn"

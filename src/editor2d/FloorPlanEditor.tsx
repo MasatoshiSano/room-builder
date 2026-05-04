@@ -46,6 +46,11 @@ export function FloorPlanEditor() {
   const addOpening = useRoomStore((s) => s.addOpening);
   const updateOpening = useRoomStore((s) => s.updateOpening);
   const setTool = useRoomStore((s) => s.setTool);
+  const personView = useRoomStore((s) => s.personView);
+  const setPersonView = useRoomStore((s) => s.setPersonView);
+  const setEditorMode = useRoomStore((s) => s.setEditorMode);
+
+  const [personMode, setPersonMode] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -100,6 +105,66 @@ export function FloorPlanEditor() {
     size.width,
     size.height,
   );
+
+  // Keep refs to the latest callbacks so the non-passive event handlers below
+  // don't need to be re-registered on every render.
+  const zoomByRef = useRef(zoomBy);
+  useEffect(() => { zoomByRef.current = zoomBy; });
+
+  // Attach non-passive wheel/touch listeners so we can call preventDefault()
+  // and prevent the browser from zooming the page during pinch gestures.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      zoomByRef.current(e.deltaY < 0 ? 1.1 : 1 / 1.1, anchor);
+    };
+
+    let pinchDist: number | null = null;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        pinchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchDist !== null) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        const midX = (t0.clientX + t1.clientX) / 2;
+        const midY = (t0.clientY + t1.clientY) / 2;
+        const rect = el.getBoundingClientRect();
+        const anchor = { x: midX - rect.left, y: midY - rect.top };
+        zoomByRef.current(dist / pinchDist, anchor);
+        pinchDist = dist;
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchDist = null;
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
 
   const panRef = useRef<{
     pointerId: number;
@@ -199,6 +264,7 @@ export function FloorPlanEditor() {
       return;
     }
     if (e.button !== 0) return;
+
     const p = getSvgPoint(e);
 
     if (tool === 'outline') {
@@ -442,6 +508,13 @@ export function FloorPlanEditor() {
           onClick={() => setTool('window')}
           disabled={!isOutlineClosed}
         />
+        {isOutlineClosed && (
+          <ToolButton
+            label="👤 人視点"
+            active={personMode}
+            onClick={() => setPersonMode((v) => !v)}
+          />
+        )}
         {tool === 'outline' && floor.outline.length > 0 && (
           <button
             type="button"
@@ -506,17 +579,11 @@ export function FloorPlanEditor() {
         className="floor-editor-svg"
         width={size.width}
         height={size.height}
+        style={{ touchAction: 'none', cursor: personMode ? 'crosshair' : undefined }}
         onPointerDown={handleSvgPointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onWheel={(e) => {
-          const rect = svgRef.current?.getBoundingClientRect();
-          const anchor = rect
-            ? { x: e.clientX - rect.left, y: e.clientY - rect.top }
-            : undefined;
-          zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1, anchor);
-        }}
         onContextMenu={(e) => e.preventDefault()}
         role="img"
         aria-label="2D 間取りエディタ"
@@ -819,6 +886,72 @@ export function FloorPlanEditor() {
             {hoverPoint.x.toFixed(2)}, {hoverPoint.z.toFixed(2)} m
           </text>
         )}
+
+        {/* Capture overlay: intercepts all clicks when personMode is active */}
+        {personMode && (
+          <rect
+            x={0}
+            y={0}
+            width={size.width}
+            height={size.height}
+            fill="transparent"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              e.stopPropagation();
+              const p = getSvgPoint(e);
+              const prev = personView;
+              setPersonView({
+                x: p.x,
+                z: p.z,
+                rotationY: prev?.rotationY ?? 0,
+                pitch: 0,
+              });
+              setEditorMode('arrange');
+              setPersonMode(false);
+            }}
+          />
+        )}
+
+        {/* Person view marker */}
+        {personView && (() => {
+          const c = transform.toScreen({ x: personView.x, z: personView.z });
+          const angleDeg = (personView.rotationY * 180) / Math.PI;
+          const R = 10;
+          const arrowLen = 20;
+          return (
+            <g
+              transform={`translate(${c.x},${c.y})`}
+              pointerEvents="none"
+              aria-label="人視点位置"
+            >
+              {/* Direction arc */}
+              <g transform={`rotate(${angleDeg})`}>
+                <line
+                  x1={0} y1={0}
+                  x2={0} y2={-(R + arrowLen)}
+                  stroke="#f59e0b"
+                  strokeWidth={2.5}
+                />
+                <polygon
+                  points={`0,${-(R + arrowLen + 7)} -5,${-(R + arrowLen)} 5,${-(R + arrowLen)}`}
+                  fill="#f59e0b"
+                />
+              </g>
+              {/* Body circle */}
+              <circle cx={0} cy={0} r={R} fill="#f59e0b" stroke="white" strokeWidth={2} />
+              {/* Person icon */}
+              <text
+                x={0} y={4}
+                textAnchor="middle"
+                fontSize="11"
+                fill="white"
+                fontWeight="bold"
+              >
+                人
+              </text>
+            </g>
+          );
+        })()}
       </svg>
 
       <p className="floor-editor-help" aria-live="polite">
@@ -836,6 +969,7 @@ export function FloorPlanEditor() {
         {tool === 'window' && '外壁をクリックしてください。'}
         {tool === 'select' &&
           '頂点・壁・開口・家具をドラッグで編集。背景ドラッグでパン、ホイールでズーム。'}
+        {personMode && '床面をクリックして人の視点位置を指定してください。'}
       </p>
     </div>
   );

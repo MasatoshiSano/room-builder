@@ -15,6 +15,18 @@ const TYPES: FurnitureType[] = [
   'chair',
   'shelf',
   'cupboard',
+  'tvBoard',
+  'tv',
+  'plant',
+  'kitchenSink',
+  'stove',
+  'refrigerator',
+  'microwave',
+  'toaster',
+  'coffeeMaker',
+  'riceCooker',
+  'washingMachine',
+  'washBasin',
   'box',
 ];
 

@@ -647,3 +647,38 @@ button { font-family: inherit; }
   border-top: 1px solid #e6e0d2;
   min-height: 28px;
 }
+
+/* Person view HUD overlay (rendered inside R3F Html) */
+.person-view-hud {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: auto;
+  user-select: none;
+  transform: translateY(-60px);
+}
+
+.person-view-hint {
+  opacity: 0.85;
+}
+
+.person-view-exit {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.person-view-exit:hover {
+  background: rgba(255, 255, 255, 0.35);
+}

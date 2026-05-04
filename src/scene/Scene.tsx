@@ -5,11 +5,14 @@ import { useRoomStore } from '../store/useRoomStore';
 import { Floor } from './Floor';
 import { Walls } from './Walls';
 import { FurnitureItem } from './FurnitureItem';
+import { PersonViewController } from './PersonViewController';
 import { bbox } from '../lib/geometry';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
 export function Scene() {
   const floor = useRoomStore((s) => s.floor);
+  const showGrid3D = useRoomStore((s) => s.showGrid3D);
+  const personView = useRoomStore((s) => s.personView);
   const furniture = useRoomStore((s) => s.furniture);
   const selection = useRoomStore((s) => s.selection);
   const setSelection = useRoomStore((s) => s.setSelection);
@@ -51,16 +54,18 @@ export function Scene() {
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
       />
-      <Grid
-        position={[cx, 0.001, cz]}
-        args={[sizeX * 2, sizeZ * 2]}
-        cellSize={0.5}
-        cellColor="#c0b6a3"
-        sectionSize={1}
-        sectionColor="#9b8d70"
-        fadeDistance={Math.max(20, dist * 2)}
-        infiniteGrid={false}
-      />
+      {showGrid3D && (
+        <Grid
+          position={[cx, 0.001, cz]}
+          args={[sizeX * 2, sizeZ * 2]}
+          cellSize={0.5}
+          cellColor="#c0b6a3"
+          sectionSize={1}
+          sectionColor="#9b8d70"
+          fadeDistance={Math.max(20, dist * 2)}
+          infiniteGrid={false}
+        />
+      )}
 
       {floor.outline.length >= 3 && (
         <>
@@ -83,13 +88,17 @@ export function Scene() {
         />
       ))}
 
-      <OrbitControls
-        ref={controlsRef}
-        makeDefault
-        enabled={orbitEnabled}
-        target={[cx, floor.height / 2, cz]}
-        enableDamping
-      />
+      <PersonViewController />
+
+      {!personView && (
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enabled={orbitEnabled}
+          target={[cx, floor.height / 2, cz]}
+          enableDamping
+        />
+      )}
     </Canvas>
   );
 }

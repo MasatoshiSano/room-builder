@@ -19,6 +19,18 @@ import { NightstandShape } from './shapes/Nightstand';
 import { ChairShape } from './shapes/Chair';
 import { ShelfShape } from './shapes/Shelf';
 import { CupboardShape } from './shapes/Cupboard';
+import { TvBoardShape } from './shapes/TvBoard';
+import { TvShape } from './shapes/Tv';
+import { PlantShape } from './shapes/Plant';
+import { KitchenSinkShape } from './shapes/KitchenSink';
+import { StoveShape } from './shapes/Stove';
+import { RefrigeratorShape } from './shapes/Refrigerator';
+import { MicrowaveShape } from './shapes/Microwave';
+import { ToasterShape } from './shapes/Toaster';
+import { CoffeeMakerShape } from './shapes/CoffeeMaker';
+import { RiceCookerShape } from './shapes/RiceCooker';
+import { WashingMachineShape } from './shapes/WashingMachine';
+import { WashBasinShape } from './shapes/WashBasin';
 
 interface FurnitureItemProps {
   furniture: Furniture;
@@ -50,6 +62,30 @@ function ShapeFor({ furniture }: { furniture: Furniture }) {
       return <ShelfShape width={width} depth={depth} height={height} color={color} />;
     case 'cupboard':
       return <CupboardShape width={width} depth={depth} height={height} color={color} />;
+    case 'tvBoard':
+      return <TvBoardShape width={width} depth={depth} height={height} color={color} />;
+    case 'tv':
+      return <TvShape width={width} depth={depth} height={height} color={color} />;
+    case 'plant':
+      return <PlantShape width={width} depth={depth} height={height} color={color} />;
+    case 'kitchenSink':
+      return <KitchenSinkShape width={width} depth={depth} height={height} color={color} />;
+    case 'stove':
+      return <StoveShape width={width} depth={depth} height={height} color={color} />;
+    case 'refrigerator':
+      return <RefrigeratorShape width={width} depth={depth} height={height} color={color} />;
+    case 'microwave':
+      return <MicrowaveShape width={width} depth={depth} height={height} color={color} />;
+    case 'toaster':
+      return <ToasterShape width={width} depth={depth} height={height} color={color} />;
+    case 'coffeeMaker':
+      return <CoffeeMakerShape width={width} depth={depth} height={height} color={color} />;
+    case 'riceCooker':
+      return <RiceCookerShape width={width} depth={depth} height={height} color={color} />;
+    case 'washingMachine':
+      return <WashingMachineShape width={width} depth={depth} height={height} color={color} />;
+    case 'washBasin':
+      return <WashBasinShape width={width} depth={depth} height={height} color={color} />;
     case 'box':
     default:
       return <BoxShape width={width} depth={depth} height={height} color={color} />;
@@ -133,6 +169,7 @@ export function FurnitureItem({
     const fSnapshot = { ...furniture };
     const floorSnapshot = useRoomStore.getState().floor;
     const edgesSnapshot: PrecomputedEdges = precomputeEdges(floorSnapshot);
+    const othersSnapshot = useRoomStore.getState().furniture.filter((f) => f.id !== furniture.id);
     let lastValid = { x: fSnapshot.x, z: fSnapshot.z };
     let moved = false;
 
@@ -156,6 +193,7 @@ export function FurnitureItem({
         { ...fSnapshot, x: nx, z: nz },
         floorSnapshot,
         edgesSnapshot,
+        othersSnapshot,
       );
       let applyX = lastValid.x;
       let applyZ = lastValid.z;
@@ -167,11 +205,13 @@ export function FurnitureItem({
           { ...fSnapshot, x: nx, z: lastValid.z },
           floorSnapshot,
           edgesSnapshot,
+          othersSnapshot,
         );
         const tryZ = isFurniturePlacementValid(
           { ...fSnapshot, x: lastValid.x, z: nz },
           floorSnapshot,
           edgesSnapshot,
+          othersSnapshot,
         );
         if (tryX) {
           applyX = nx;

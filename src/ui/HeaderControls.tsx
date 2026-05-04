@@ -7,6 +7,8 @@ export function HeaderControls() {
   const setEditorMode = useRoomStore((s) => s.setEditorMode);
   const gridSize = useRoomStore((s) => s.gridSize);
   const setGridSize = useRoomStore((s) => s.setGridSize);
+  const showGrid3D = useRoomStore((s) => s.showGrid3D);
+  const setShowGrid3D = useRoomStore((s) => s.setShowGrid3D);
 
   return (
     <div className="header-controls">
@@ -46,6 +48,18 @@ export function HeaderControls() {
             </button>
           ))}
         </div>
+        {editorMode === 'arrange' && (
+          <button
+            type="button"
+            className={`seg-btn${showGrid3D ? ' is-active' : ''}`}
+            role="switch"
+            aria-checked={showGrid3D}
+            title="3Dグリッド表示切替"
+            onClick={() => setShowGrid3D(!showGrid3D)}
+          >
+            マス目
+          </button>
+        )}
       </div>
     </div>
   );

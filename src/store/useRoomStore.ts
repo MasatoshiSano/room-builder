@@ -41,6 +41,8 @@ interface RoomStore extends PersistedState {
   editorMode: EditorMode;
   tool: Tool;
   gridSize: number;
+  showGrid3D: boolean;
+  personView: { x: number; z: number; rotationY: number; pitch: number } | null;
   savedPlans: SavedPlan[];
   persistError: string | null;
 
@@ -84,6 +86,8 @@ interface RoomStore extends PersistedState {
   setTool: (t: Tool) => void;
   setSelection: (s: Selection | null) => void;
   setGridSize: (n: number) => void;
+  setShowGrid3D: (v: boolean) => void;
+  setPersonView: (v: { x: number; z: number; rotationY: number; pitch: number } | null) => void;
   resetAll: () => void;
   loadSample: () => void;
 
@@ -92,6 +96,7 @@ interface RoomStore extends PersistedState {
 
   // saved plans
   savePlan: (name: string) => void;
+  overwritePlan: (id: string) => void;
   loadPlan: (id: string) => void;
   deletePlan: (id: string) => void;
   renamePlan: (id: string, name: string) => void;
@@ -329,6 +334,8 @@ export const useRoomStore = create<RoomStore>()(
     editorMode: initial.floor.outline.length >= 3 ? 'arrange' : 'plan',
     tool: initial.floor.outline.length >= 3 ? 'select' : 'outline',
     gridSize: 0.1,
+    showGrid3D: true,
+    personView: null,
     savedPlans: loadSavedPlans(),
     persistError: null,
 
@@ -534,6 +541,8 @@ export const useRoomStore = create<RoomStore>()(
     },
     setSelection: (s) => set({ selection: s }),
     setGridSize: (n) => set({ gridSize: n }),
+    setShowGrid3D: (v) => set({ showGrid3D: v }),
+    setPersonView: (v) => set({ personView: v }),
     resetAll: () =>
       set({
         floor: DEFAULT_FLOOR,
@@ -567,6 +576,16 @@ export const useRoomStore = create<RoomStore>()(
         },
       };
       const next = [plan, ...get().savedPlans];
+      persistSavedPlans(next);
+      set({ savedPlans: next });
+    },
+
+    overwritePlan: (id) => {
+      const next = get().savedPlans.map((p) =>
+        p.id === id
+          ? { ...p, savedAt: Date.now(), data: { floor: get().floor, furniture: get().furniture } }
+          : p,
+      );
       persistSavedPlans(next);
       set({ savedPlans: next });
     },

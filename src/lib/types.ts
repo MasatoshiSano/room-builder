@@ -8,7 +8,19 @@ export type FurnitureType =
   | 'nightstand'
   | 'chair'
   | 'shelf'
-  | 'cupboard';
+  | 'cupboard'
+  | 'tvBoard'
+  | 'tv'
+  | 'plant'
+  | 'kitchenSink'
+  | 'stove'
+  | 'refrigerator'
+  | 'microwave'
+  | 'toaster'
+  | 'coffeeMaker'
+  | 'riceCooker'
+  | 'washingMachine'
+  | 'washBasin';
 
 export type EditorMode = 'plan' | 'arrange';
 
@@ -104,6 +116,18 @@ export const FURNITURE_TYPE_LABELS: Record<FurnitureType, string> = {
   chair: 'チェア',
   shelf: 'シェルフ',
   cupboard: '食器棚',
+  tvBoard: 'テレビ台',
+  tv: 'テレビ',
+  plant: '植木',
+  kitchenSink: 'キッチンシンク',
+  stove: 'コンロ',
+  refrigerator: '冷蔵庫',
+  microwave: '電子レンジ',
+  toaster: 'トースター',
+  coffeeMaker: 'コーヒーメーカー',
+  riceCooker: '炊飯器',
+  washingMachine: '洗濯機',
+  washBasin: '洗面台',
 };
 
 export const FURNITURE_DEFAULTS: Record<
@@ -120,4 +144,16 @@ export const FURNITURE_DEFAULTS: Record<
   chair: { width: 0.5, depth: 0.5, height: 0.9, color: '#7d8a99' },
   shelf: { width: 0.8, depth: 0.4, height: 1.8, color: '#8a6f53' },
   cupboard: { width: 0.9, depth: 0.45, height: 1.9, color: '#6f5840' },
+  tvBoard: { width: 1.5, depth: 0.45, height: 0.45, color: '#7a6248' },
+  tv: { width: 1.2, depth: 0.08, height: 0.7, color: '#1a1a1a' },
+  plant: { width: 0.4, depth: 0.4, height: 1.2, color: '#4a8a3a' },
+  kitchenSink: { width: 0.8, depth: 0.6, height: 0.85, color: '#c0bdb5' },
+  stove: { width: 0.75, depth: 0.6, height: 0.85, color: '#b0aea8' },
+  refrigerator: { width: 0.6, depth: 0.65, height: 1.8, color: '#d0cec8' },
+  microwave: { width: 0.5, depth: 0.38, height: 0.32, color: '#3a3a3a' },
+  toaster: { width: 0.32, depth: 0.22, height: 0.22, color: '#888880' },
+  coffeeMaker: { width: 0.28, depth: 0.24, height: 0.38, color: '#2a2a2a' },
+  riceCooker: { width: 0.28, depth: 0.28, height: 0.22, color: '#e0ddd5' },
+  washingMachine: { width: 0.6, depth: 0.6, height: 0.85, color: '#e8e8e8' },
+  washBasin: { width: 0.75, depth: 0.45, height: 1.8, color: '#dedad4' },
 };

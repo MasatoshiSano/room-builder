@@ -64,6 +64,9 @@ export function Wall({
             <meshStandardMaterial
               color={color}
               side={isOuter ? BackSide : DoubleSide}
+              transparent
+              opacity={isOuter ? 0.6 : 0.75}
+              depthWrite={false}
             />
           </mesh>
         );
