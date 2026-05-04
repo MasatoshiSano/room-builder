@@ -5,6 +5,7 @@ import { useThree, type ThreeEvent } from '@react-three/fiber';
 import { useRoomStore } from '../store/useRoomStore';
 import type { Furniture } from '../lib/types';
 import {
+  computeStackY,
   isFurniturePlacementValid,
   precomputeEdges,
   type PrecomputedEdges,
@@ -117,9 +118,16 @@ export function FurnitureItem({
   const updateFurniture = useRoomStore((s) => s.updateFurniture);
   const removeFurniture = useRoomStore((s) => s.removeFurniture);
   const duplicateFurniture = useRoomStore((s) => s.duplicateFurniture);
+  const allFurniture = useRoomStore((s) => s.furniture);
+  const personView = useRoomStore((s) => s.personView);
   const { camera, gl, size } = useThree();
 
   const [isDragging, setIsDragging] = useState(false);
+
+  const stackY = (() => {
+    const others = allFurniture.filter((x) => x.id !== furniture.id);
+    return computeStackY(furniture, others);
+  })();
 
   // Resize state (for the corner handles in <Html>)
   const resizeRef = useRef<{
@@ -132,10 +140,10 @@ export function FurnitureItem({
   // Sync visual position when furniture data changes and we are NOT dragging
   useEffect(() => {
     if (groupRef.current && !isDragging) {
-      groupRef.current.position.set(furniture.x, 0, furniture.z);
+      groupRef.current.position.set(furniture.x, stackY, furniture.z);
       groupRef.current.rotation.set(0, furniture.rotationY, 0);
     }
-  }, [furniture.x, furniture.z, furniture.rotationY, furniture.id, isDragging]);
+  }, [furniture.x, furniture.z, furniture.rotationY, furniture.id, stackY, isDragging]);
 
   const screenToFloor = (clientX: number, clientY: number): Vector3 | null => {
     const rect = gl.domElement.getBoundingClientRect();
@@ -222,7 +230,13 @@ export function FurnitureItem({
       }
       lastValid = { x: applyX, z: applyZ };
       if (groupRef.current) {
-        groupRef.current.position.set(applyX, 0, applyZ);
+        // Recompute stack-on-top y for the live position so the item
+        // visually rides on top of whatever it currently overlaps.
+        const liveStackY = computeStackY(
+          { ...fSnapshot, x: applyX, z: applyZ },
+          othersSnapshot,
+        );
+        groupRef.current.position.set(applyX, liveStackY, applyZ);
       }
     };
 
@@ -374,11 +388,10 @@ export function FurnitureItem({
         </mesh>
       )}
 
-      {isSelected && !isDragging && (
+      {isSelected && !isDragging && !personView && (
         <Html
           position={[0, furniture.height + 0.15, 0]}
           center
-          distanceFactor={6}
           zIndexRange={[100, 0]}
           style={{ pointerEvents: 'auto' }}
         >
@@ -439,7 +452,7 @@ export function FurnitureItem({
         </Html>
       )}
 
-      {isSelected && resizing && (
+      {isSelected && resizing && !personView && (
         <>
           {(Object.keys(CORNER_SIGN) as Corner[]).map((c) => {
             const s = CORNER_SIGN[c];
@@ -452,7 +465,6 @@ export function FurnitureItem({
                   (s.z * furniture.depth) / 2,
                 ]}
                 center
-                distanceFactor={6}
                 zIndexRange={[101, 0]}
                 style={{ pointerEvents: 'auto' }}
               >
@@ -467,7 +479,6 @@ export function FurnitureItem({
           <Html
             position={[0, furniture.height + 0.02, 0]}
             center
-            distanceFactor={6}
             zIndexRange={[101, 0]}
             style={{ pointerEvents: 'auto' }}
           >

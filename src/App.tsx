@@ -39,6 +39,15 @@ export default function App() {
 
       if (tool === 'outline' && e.key === 'Backspace') {
         e.preventDefault();
+        if (selection?.kind === 'vertex') {
+          const idx = Number(selection.id);
+          const cur = useRoomStore.getState().floor.outline.length;
+          if (cur > 3) {
+            removeVertex(idx);
+            setSelection(null);
+            return;
+          }
+        }
         popOutlineVertex();
         return;
       }

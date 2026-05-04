@@ -5,14 +5,20 @@ import { Wall } from './Wall';
 
 interface WallsProps {
   floor: FloorPlan;
+  /** When true, render walls fully opaque and block pointer events. */
+  opaque?: boolean;
 }
 
-export function Walls({ floor }: WallsProps) {
+export function Walls({ floor, opaque = false }: WallsProps) {
   const outer = useMemo(() => outerEdges(floor.outline), [floor.outline]);
   const inner = useMemo(() => innerEdges(floor.innerWalls), [floor.innerWalls]);
 
   const groupedOuter = groupOpenings(floor.openings, 'outer');
   const groupedInner = groupOpenings(floor.openings, 'inner');
+
+  // User-controlled opacity (0..1). Default 0.6.
+  const userOpacity =
+    typeof floor.wallOpacity === 'number' ? floor.wallOpacity : 0.6;
 
   return (
     <>
@@ -32,6 +38,8 @@ export function Walls({ floor }: WallsProps) {
             openings={ops}
             color={floor.wallColor}
             variant="outer"
+            opaque={opaque}
+            opacity={userOpacity}
           />
         );
       })}
@@ -51,6 +59,8 @@ export function Walls({ floor }: WallsProps) {
             openings={ops}
             color={floor.wallColor}
             variant="inner"
+            opaque={opaque}
+            opacity={userOpacity}
           />
         );
       })}

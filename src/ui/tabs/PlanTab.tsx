@@ -9,6 +9,7 @@ export function PlanTab() {
   const setFloorHeight = useRoomStore((s) => s.setFloorHeight);
   const setWallColor = useRoomStore((s) => s.setWallColor);
   const setFloorColor = useRoomStore((s) => s.setFloorColor);
+  const setWallOpacity = useRoomStore((s) => s.setWallOpacity);
   const setOutline = useRoomStore((s) => s.setOutline);
   const setSelection = useRoomStore((s) => s.setSelection);
   const setTool = useRoomStore((s) => s.setTool);
@@ -48,6 +49,22 @@ export function PlanTab() {
             aria-label="床の色"
           />
           <span aria-hidden="true">{floor.floorColor}</span>
+        </label>
+        <label className="color-row">
+          <span>壁の透明度</span>
+          <input
+            type="range"
+            min={0.05}
+            max={1}
+            step={0.05}
+            value={floor.wallOpacity ?? 0.6}
+            onChange={(e) => setWallOpacity(Number(e.target.value))}
+            aria-label="壁の透明度（人視点では常に不透明）"
+            style={{ flex: 1 }}
+          />
+          <span aria-hidden="true">
+            {Math.round(((floor.wallOpacity ?? 0.6) as number) * 100)}%
+          </span>
         </label>
       </section>
 

@@ -5,7 +5,11 @@ import {
   distance,
   ensureCCW,
   outerEdges,
+  outlineAppendWouldCross,
+  outlineCloseWouldCross,
+  outlineInsertWouldCross,
   pointInPolygon,
+  segmentsIntersect,
   signedArea,
   snap,
   snapPoint,
@@ -114,5 +118,117 @@ describe('snap', () => {
     const r = snapPoint({ x: 0.13, z: 0.27 }, 0.1);
     expect(r.x).toBeCloseTo(0.1);
     expect(r.z).toBeCloseTo(0.3);
+  });
+});
+
+describe('segmentsIntersect', () => {
+  it('detects clear crossing', () => {
+    expect(
+      segmentsIntersect(
+        { x: 0, z: 0 },
+        { x: 2, z: 2 },
+        { x: 0, z: 2 },
+        { x: 2, z: 0 },
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false when segments share an endpoint', () => {
+    expect(
+      segmentsIntersect(
+        { x: 0, z: 0 },
+        { x: 1, z: 1 },
+        { x: 1, z: 1 },
+        { x: 2, z: 0 },
+      ),
+    ).toBe(false);
+  });
+
+  it('returns false for separated segments', () => {
+    expect(
+      segmentsIntersect(
+        { x: 0, z: 0 },
+        { x: 1, z: 0 },
+        { x: 0, z: 5 },
+        { x: 1, z: 5 },
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('outlineAppendWouldCross', () => {
+  it('false when outline has fewer than 2 vertices', () => {
+    expect(outlineAppendWouldCross([], { x: 0, z: 0 })).toBe(false);
+    expect(
+      outlineAppendWouldCross([{ x: 0, z: 0 }], { x: 1, z: 1 }),
+    ).toBe(false);
+  });
+
+  it('detects new edge crossing earlier edge', () => {
+    // (0,0)→(2,0)→(2,2). Append (1,-2): new edge (2,2)→(1,-2) crosses
+    // (0,0)→(2,0) at interior point (1.5, 0).
+    const outline: Vec2[] = [
+      { x: 0, z: 0 },
+      { x: 2, z: 0 },
+      { x: 2, z: 2 },
+    ];
+    expect(outlineAppendWouldCross(outline, { x: 1, z: -2 })).toBe(true);
+  });
+
+  it('does not flag valid extension', () => {
+    const outline: Vec2[] = [
+      { x: 0, z: 0 },
+      { x: 2, z: 0 },
+      { x: 2, z: 2 },
+    ];
+    expect(outlineAppendWouldCross(outline, { x: 0, z: 2 })).toBe(false);
+  });
+});
+
+describe('outlineCloseWouldCross', () => {
+  it('false for triangle (cannot self-cross)', () => {
+    const tri: Vec2[] = [
+      { x: 0, z: 0 },
+      { x: 2, z: 0 },
+      { x: 1, z: 2 },
+    ];
+    expect(outlineCloseWouldCross(tri)).toBe(false);
+  });
+
+  it('detects bowtie close', () => {
+    // (0,0)→(2,2)→(2,0)→(0,2): closing (0,2)→(0,0) crosses (2,2)→(2,0)? No.
+    // Use clearer bowtie: (0,0)→(2,0)→(0,2)→(2,2). Closing (2,2)→(0,0) crosses (2,0)→(0,2).
+    const bowtie: Vec2[] = [
+      { x: 0, z: 0 },
+      { x: 2, z: 0 },
+      { x: 0, z: 2 },
+      { x: 2, z: 2 },
+    ];
+    expect(outlineCloseWouldCross(bowtie)).toBe(true);
+  });
+});
+
+describe('outlineInsertWouldCross', () => {
+  const square: Vec2[] = [
+    { x: 0, z: 0 },
+    { x: 4, z: 0 },
+    { x: 4, z: 4 },
+    { x: 0, z: 4 },
+  ];
+
+  it('false when inserting in a benign location', () => {
+    // Insert between idx 0 and idx 1 a point above the (0,0)-(4,0) edge.
+    expect(outlineInsertWouldCross(square, 0, { x: 2, z: -1 })).toBe(false);
+  });
+
+  it('detects a clearly crossing insertion', () => {
+    // Insert P=(2,6) between idx 1=(4,0) and idx 2=(4,4). New edge
+    // (4,0)→(2,6) crosses the non-adjacent edge (4,4)→(0,4) at x≈2.67.
+    expect(outlineInsertWouldCross(square, 1, { x: 2, z: 6 })).toBe(true);
+  });
+
+  it('false at boundary indices', () => {
+    expect(outlineInsertWouldCross(square, -1, { x: 1, z: 1 })).toBe(false);
+    expect(outlineInsertWouldCross(square, 99, { x: 1, z: 1 })).toBe(false);
   });
 });

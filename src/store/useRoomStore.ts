@@ -49,6 +49,8 @@ interface RoomStore extends PersistedState {
   // floor
   setOutline: (outline: Vec2[]) => void;
   appendOutlineVertex: (p: Vec2) => void;
+  /** Insert vertex at `index` (so the new vertex ends up at array[index]). */
+  insertOutlineVertex: (index: number, p: Vec2) => void;
   popOutlineVertex: () => void;
   closeOutline: () => void;
   updateVertex: (index: number, p: Vec2) => void;
@@ -56,6 +58,7 @@ interface RoomStore extends PersistedState {
   setFloorHeight: (h: number) => void;
   setWallColor: (c: string) => void;
   setFloorColor: (c: string) => void;
+  setWallOpacity: (v: number) => void;
 
   // background image
   setBackgroundImage: (img: BackgroundImage | undefined) => void;
@@ -100,6 +103,11 @@ interface RoomStore extends PersistedState {
   loadPlan: (id: string) => void;
   deletePlan: (id: string) => void;
   renamePlan: (id: string, name: string) => void;
+  exportSavedPlans: () => string; // returns JSON string
+  importSavedPlans: (
+    json: string,
+    mode: 'merge' | 'replace',
+  ) => { added: number; skipped: number; error?: string };
 }
 
 const DEFAULT_FLOOR: FloorPlan = {
@@ -224,6 +232,12 @@ function sanitizeFloor(raw: unknown): FloorPlan | null {
     height: typeof r.height === 'number' && r.height > 0 ? r.height : 2.5,
     wallColor: typeof r.wallColor === 'string' ? r.wallColor : '#efe9dd',
     floorColor: typeof r.floorColor === 'string' ? r.floorColor : '#d4c8b3',
+    wallOpacity:
+      typeof r.wallOpacity === 'number' &&
+      r.wallOpacity > 0 &&
+      r.wallOpacity <= 1
+        ? r.wallOpacity
+        : undefined,
     backgroundImage: sanitizeBackgroundImage(r.backgroundImage),
   };
 }
@@ -347,6 +361,15 @@ export const useRoomStore = create<RoomStore>()(
         floor: { ...s.floor, outline: [...s.floor.outline, p] },
       })),
 
+    insertOutlineVertex: (index, p) =>
+      set((s) => {
+        const n = s.floor.outline.length;
+        const i = Math.max(0, Math.min(n, index));
+        const next = [...s.floor.outline];
+        next.splice(i, 0, p);
+        return { floor: { ...s.floor, outline: next } };
+      }),
+
     popOutlineVertex: () =>
       set((s) => {
         if (s.floor.outline.length === 0) return {};
@@ -387,6 +410,13 @@ export const useRoomStore = create<RoomStore>()(
       set((s) => ({ floor: { ...s.floor, wallColor: c } })),
     setFloorColor: (c) =>
       set((s) => ({ floor: { ...s.floor, floorColor: c } })),
+    setWallOpacity: (v) =>
+      set((s) => ({
+        floor: {
+          ...s.floor,
+          wallOpacity: Math.max(0.05, Math.min(1, v)),
+        },
+      })),
 
     setBackgroundImage: (img) =>
       set((s) => ({ floor: { ...s.floor, backgroundImage: img } })),
@@ -550,6 +580,7 @@ export const useRoomStore = create<RoomStore>()(
         selection: null,
         editorMode: 'plan',
         tool: 'outline',
+        personView: null,
       }),
 
     loadSample: () => {
@@ -560,6 +591,7 @@ export const useRoomStore = create<RoomStore>()(
         selection: null,
         editorMode: 'arrange',
         tool: 'select',
+        personView: null,
       });
     },
 
@@ -598,6 +630,9 @@ export const useRoomStore = create<RoomStore>()(
         furniture: plan.data.furniture,
         selection: null,
         tool: 'select',
+        // The previous person-view position belongs to the old plan; clear it
+        // so the user doesn't end up stuck outside walls of the new one.
+        personView: null,
       });
     },
 
@@ -613,6 +648,75 @@ export const useRoomStore = create<RoomStore>()(
       );
       persistSavedPlans(next);
       set({ savedPlans: next });
+    },
+
+    exportSavedPlans: () => {
+      const payload = {
+        kind: 'room-builder.saved-plans',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        plans: get().savedPlans,
+      };
+      return JSON.stringify(payload, null, 2);
+    },
+
+    importSavedPlans: (json, mode) => {
+      const parsed = safeJsonParse(json);
+      if (!parsed || typeof parsed !== 'object') {
+        return { added: 0, skipped: 0, error: 'JSON の解析に失敗しました' };
+      }
+      const root = parsed as { plans?: unknown };
+      // Accept both { plans: [...] } and a bare array.
+      const rawList: unknown[] = Array.isArray(root.plans)
+        ? root.plans
+        : Array.isArray(parsed)
+          ? (parsed as unknown[])
+          : [];
+      if (rawList.length === 0) {
+        return { added: 0, skipped: 0, error: 'プランが含まれていません' };
+      }
+      const incoming: SavedPlan[] = [];
+      let skipped = 0;
+      for (const entry of rawList) {
+        if (!entry || typeof entry !== 'object') {
+          skipped++;
+          continue;
+        }
+        const p = entry as Partial<SavedPlan>;
+        const data = sanitizePersisted(p.data);
+        if (!data || typeof p.name !== 'string') {
+          skipped++;
+          continue;
+        }
+        incoming.push({
+          id: typeof p.id === 'string' && p.id ? p.id : uid(),
+          name: p.name,
+          savedAt: typeof p.savedAt === 'number' ? p.savedAt : Date.now(),
+          data,
+        });
+      }
+      if (incoming.length === 0) {
+        return { added: 0, skipped, error: '有効なプランがありませんでした' };
+      }
+      let next: SavedPlan[];
+      if (mode === 'replace') {
+        next = incoming;
+      } else {
+        const existingIds = new Set(get().savedPlans.map((p) => p.id));
+        const merged = [...get().savedPlans];
+        for (const p of incoming) {
+          if (existingIds.has(p.id)) {
+            // assign a fresh id to preserve both copies
+            merged.unshift({ ...p, id: uid() });
+          } else {
+            merged.unshift(p);
+          }
+        }
+        next = merged;
+      }
+      persistSavedPlans(next);
+      set({ savedPlans: next });
+      return { added: incoming.length, skipped };
     },
   })),
 );

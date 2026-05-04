@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 
 export function SavedPlansSection() {
@@ -8,10 +8,53 @@ export function SavedPlansSection() {
   const loadPlan = useRoomStore((s) => s.loadPlan);
   const deletePlan = useRoomStore((s) => s.deletePlan);
   const renamePlan = useRoomStore((s) => s.renamePlan);
+  const exportSavedPlans = useRoomStore((s) => s.exportSavedPlans);
+  const importSavedPlans = useRoomStore((s) => s.importSavedPlans);
 
   const [name, setName] = useState('');
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = () => {
+    const json = exportSavedPlans();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = url;
+    a.download = `room-builder-plans-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-importing the same file
+    if (!file) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      alert('ファイルの読み込みに失敗しました');
+      return;
+    }
+    const replace =
+      savedPlans.length > 0 &&
+      confirm(
+        '既存の保存プランを置き換えますか？\n  OK = 置き換え（既存は消えます）\n  キャンセル = 既存に追加（マージ）',
+      );
+    const result = importSavedPlans(text, replace ? 'replace' : 'merge');
+    if (result.error) {
+      alert(`インポート失敗: ${result.error}`);
+    } else {
+      alert(`インポート完了: ${result.added} 件追加 / ${result.skipped} 件スキップ`);
+    }
+  };
 
   return (
     <section className="panel" aria-labelledby="saved-plans">
@@ -44,6 +87,33 @@ export function SavedPlansSection() {
         >
           保存
         </button>
+      </div>
+
+      <div className="save-row" style={{ marginTop: 6 }}>
+        <button
+          type="button"
+          className="qbtn"
+          onClick={handleExport}
+          disabled={savedPlans.length === 0}
+          title="保存プランを JSON ファイルにダウンロード"
+        >
+          ⤓ エクスポート
+        </button>
+        <button
+          type="button"
+          className="qbtn"
+          onClick={handleImportClick}
+          title="JSON ファイルから読み込み"
+        >
+          ⤒ インポート
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={handleImportFile}
+        />
       </div>
 
       {savedPlans.length === 0 ? (

@@ -1,4 +1,5 @@
 import { useRoomStore } from '../store/useRoomStore';
+import { bbox, pointInPolygon } from '../lib/geometry';
 
 const GRID_VALUES = [0.05, 0.1, 0.25, 0.5];
 
@@ -9,6 +10,10 @@ export function HeaderControls() {
   const setGridSize = useRoomStore((s) => s.setGridSize);
   const showGrid3D = useRoomStore((s) => s.showGrid3D);
   const setShowGrid3D = useRoomStore((s) => s.setShowGrid3D);
+  const personView = useRoomStore((s) => s.personView);
+  const setPersonView = useRoomStore((s) => s.setPersonView);
+  const floor = useRoomStore((s) => s.floor);
+  const isOutlineClosed = floor.outline.length >= 3;
 
   return (
     <div className="header-controls">
@@ -58,6 +63,31 @@ export function HeaderControls() {
             onClick={() => setShowGrid3D(!showGrid3D)}
           >
             マス目
+          </button>
+        )}
+        {isOutlineClosed && (
+          <button
+            type="button"
+            className={`seg-btn${personView ? ' is-active' : ''}`}
+            role="switch"
+            aria-checked={!!personView}
+            title="人視点モード切替"
+            onClick={() => {
+              if (personView) {
+                setPersonView(null);
+                return;
+              }
+              const b = bbox(floor.outline);
+              const cx = (b.minX + b.maxX) / 2;
+              const cz = (b.minZ + b.maxZ) / 2;
+              const center = { x: cx, z: cz };
+              const inside = pointInPolygon(center, floor.outline);
+              const start = inside ? center : floor.outline[0] ?? { x: 0, z: 0 };
+              setPersonView({ x: start.x, z: start.z, rotationY: 0, pitch: 0 });
+              setEditorMode('arrange');
+            }}
+          >
+            👤 人視点
           </button>
         )}
       </div>

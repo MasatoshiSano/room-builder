@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 import {
+  bbox,
   closestOnSegment,
   distance,
   innerEdges,
   midpoint,
   outerEdges,
+  outlineAppendWouldCross,
+  outlineCloseWouldCross,
+  outlineInsertWouldCross,
+  pointInPolygon,
   snapPoint,
 } from '../lib/geometry';
 import type { Vec2, WallRef } from '../lib/types';
@@ -38,6 +43,7 @@ export function FloorPlanEditor() {
   const gridSize = useRoomStore((s) => s.gridSize);
   const setSelection = useRoomStore((s) => s.setSelection);
   const appendOutlineVertex = useRoomStore((s) => s.appendOutlineVertex);
+  const insertOutlineVertex = useRoomStore((s) => s.insertOutlineVertex);
   const closeOutline = useRoomStore((s) => s.closeOutline);
   const popOutlineVertex = useRoomStore((s) => s.popOutlineVertex);
   const updateVertex = useRoomStore((s) => s.updateVertex);
@@ -268,14 +274,38 @@ export function FloorPlanEditor() {
     const p = getSvgPoint(e);
 
     if (tool === 'outline') {
+      // Click near the first vertex to close (only if it wouldn't cross).
       if (
         floor.outline.length >= 3 &&
         distance(p, floor.outline[0]) < gridSize * 1.5
       ) {
+        if (outlineCloseWouldCross(floor.outline)) {
+          return;
+        }
         closeOutline();
         return;
       }
+      // If a vertex is selected, insert the new point AFTER it (branch from
+      // selected); otherwise append to the chain end.
+      const selectedIdx =
+        selection?.kind === 'vertex' ? Number(selection.id) : -1;
+      const useInsert =
+        selectedIdx >= 0 &&
+        selectedIdx < floor.outline.length &&
+        selectedIdx !== floor.outline.length - 1;
+      if (useInsert) {
+        if (outlineInsertWouldCross(floor.outline, selectedIdx, p)) return;
+        const newIdx = selectedIdx + 1;
+        insertOutlineVertex(newIdx, p);
+        setSelection({ kind: 'vertex', id: String(newIdx) });
+        return;
+      }
+      if (outlineAppendWouldCross(floor.outline, p)) {
+        return;
+      }
       appendOutlineVertex(p);
+      // Move selection to the just-added vertex so further clicks chain naturally.
+      setSelection({ kind: 'vertex', id: String(floor.outline.length) });
       return;
     }
 
@@ -404,6 +434,21 @@ export function FloorPlanEditor() {
     vertexIndex: number,
   ) => {
     e.stopPropagation();
+    if (tool === 'outline') {
+      // Clicking the first vertex while drawing closes the polygon
+      // (if not already closed and the close edge wouldn't cross).
+      if (
+        vertexIndex === 0 &&
+        !isOutlineClosed &&
+        floor.outline.length >= 3
+      ) {
+        if (!outlineCloseWouldCross(floor.outline)) closeOutline();
+        return;
+      }
+      // Otherwise: select the vertex so further clicks branch from here.
+      setSelection({ kind: 'vertex', id: String(vertexIndex) });
+      return;
+    }
     if (tool !== 'select') return;
     setSelection({ kind: 'vertex', id: String(vertexIndex) });
     setDrag({ kind: 'vertex', id: vertexIndex });
@@ -511,29 +556,64 @@ export function FloorPlanEditor() {
         {isOutlineClosed && (
           <ToolButton
             label="👤 人視点"
-            active={personMode}
-            onClick={() => setPersonMode((v) => !v)}
+            active={personMode || !!personView}
+            onClick={() => {
+              if (personView) {
+                setPersonView(null);
+                setPersonMode(false);
+                return;
+              }
+              // Drop person at the room center (or last vertex if center is outside).
+              const b = bbox(floor.outline);
+              const cx = (b.minX + b.maxX) / 2;
+              const cz = (b.minZ + b.maxZ) / 2;
+              const center = { x: cx, z: cz };
+              const inside = pointInPolygon(center, floor.outline);
+              const start = inside
+                ? center
+                : floor.outline[0] ?? { x: 0, z: 0 };
+              setPersonView({ x: start.x, z: start.z, rotationY: 0, pitch: 0 });
+              setEditorMode('arrange');
+              setPersonMode(false);
+            }}
           />
         )}
         {tool === 'outline' && floor.outline.length > 0 && (
           <button
             type="button"
             className="tool-btn"
-            onClick={() => popOutlineVertex()}
-            title="直前の頂点を取り消し（Backspace）"
+            onClick={() => {
+              if (selection?.kind === 'vertex') {
+                const idx = Number(selection.id);
+                if (floor.outline.length > 3) {
+                  useRoomStore.getState().removeVertex(idx);
+                  setSelection(null);
+                  return;
+                }
+              }
+              popOutlineVertex();
+            }}
+            title="直前/選択中の頂点を取り消し（Backspace）"
           >
             ↶ 1点戻す
           </button>
         )}
-        {tool === 'outline' && floor.outline.length >= 3 && (
-          <button
-            type="button"
-            className="floor-editor-finish"
-            onClick={() => closeOutline()}
-          >
-            外周を閉じる
-          </button>
-        )}
+        {tool === 'outline' && floor.outline.length >= 3 && (() => {
+          const wouldCross = outlineCloseWouldCross(floor.outline);
+          return (
+            <button
+              type="button"
+              className="floor-editor-finish"
+              onClick={() => {
+                if (!wouldCross) closeOutline();
+              }}
+              disabled={wouldCross}
+              title={wouldCross ? '閉じる線が他の辺と交差します' : '外周を閉じる'}
+            >
+              外周を閉じる
+            </button>
+          );
+        })()}
         <div className="view-controls">
           <button
             type="button"
@@ -611,17 +691,56 @@ export function FloorPlanEditor() {
 
         {tool === 'outline' &&
           floor.outline.length > 0 &&
-          hoverPoint && (
-            <line
-              x1={transform.toScreen(floor.outline[floor.outline.length - 1]).x}
-              y1={transform.toScreen(floor.outline[floor.outline.length - 1]).y}
-              x2={transform.toScreen(hoverPoint).x}
-              y2={transform.toScreen(hoverPoint).y}
-              stroke="#1f4b8e"
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
-            />
-          )}
+          hoverPoint &&
+          (() => {
+            const selIdx =
+              selection?.kind === 'vertex' ? Number(selection.id) : -1;
+            const useInsert =
+              selIdx >= 0 &&
+              selIdx < floor.outline.length &&
+              selIdx !== floor.outline.length - 1;
+            const anchorIdx = useInsert ? selIdx : floor.outline.length - 1;
+            const anchor = floor.outline[anchorIdx];
+            const closing =
+              !useInsert &&
+              floor.outline.length >= 3 &&
+              distance(hoverPoint, floor.outline[0]) < gridSize * 1.5;
+            const target = closing ? floor.outline[0] : hoverPoint;
+            const crosses = closing
+              ? outlineCloseWouldCross(floor.outline)
+              : useInsert
+                ? outlineInsertWouldCross(floor.outline, anchorIdx, hoverPoint)
+                : outlineAppendWouldCross(floor.outline, hoverPoint);
+            const followNext =
+              useInsert && anchorIdx + 1 < floor.outline.length
+                ? floor.outline[anchorIdx + 1]
+                : null;
+            return (
+              <g>
+                <line
+                  x1={transform.toScreen(anchor).x}
+                  y1={transform.toScreen(anchor).y}
+                  x2={transform.toScreen(target).x}
+                  y2={transform.toScreen(target).y}
+                  stroke={crosses ? '#dc2626' : '#1f4b8e'}
+                  strokeWidth={crosses ? 2 : 1.5}
+                  strokeDasharray={crosses ? '5 4' : '4 3'}
+                />
+                {followNext && (
+                  <line
+                    x1={transform.toScreen(target).x}
+                    y1={transform.toScreen(target).y}
+                    x2={transform.toScreen(followNext).x}
+                    y2={transform.toScreen(followNext).y}
+                    stroke={crosses ? '#dc2626' : '#1f4b8e'}
+                    strokeWidth={crosses ? 2 : 1.5}
+                    strokeDasharray={crosses ? '5 4' : '4 3'}
+                    opacity={0.6}
+                  />
+                )}
+              </g>
+            );
+          })()}
 
         {tool === 'innerWall' &&
           snappedHover &&
@@ -794,7 +913,21 @@ export function FloorPlanEditor() {
           const s = transform.toScreen(v);
           const isSel =
             selection?.kind === 'vertex' && selection.id === String(i);
-          const isFirst = i === 0 && tool === 'outline';
+          const drawingOutline = tool === 'outline' && !isOutlineClosed;
+          const isFirst = i === 0 && drawingOutline;
+          const selIdx =
+            selection?.kind === 'vertex' ? Number(selection.id) : -1;
+          const useInsert =
+            drawingOutline &&
+            selIdx >= 0 &&
+            selIdx < floor.outline.length &&
+            selIdx !== floor.outline.length - 1;
+          const anchorIdx = useInsert ? selIdx : floor.outline.length - 1;
+          const isLast =
+            drawingOutline &&
+            i === anchorIdx &&
+            floor.outline.length > 0 &&
+            !isFirst;
           const closeHover =
             isFirst &&
             floor.outline.length >= 3 &&
@@ -822,20 +955,33 @@ export function FloorPlanEditor() {
                   pointerEvents="none"
                 />
               )}
+              {isLast && (
+                <circle
+                  cx={s.x}
+                  cy={s.y}
+                  r={12}
+                  fill="none"
+                  stroke="#22c55e"
+                  strokeWidth={2}
+                  pointerEvents="none"
+                />
+              )}
               <circle
                 cx={s.x}
                 cy={s.y}
-                r={isSel ? 8 : isFirst ? (closeHover ? 11 : 8) : 6}
+                r={isSel ? 8 : isFirst ? (closeHover ? 11 : 8) : isLast ? 7 : 6}
                 fill={
                   closeHover
                     ? '#1f4b8e'
                     : isFirst
                       ? '#1f4b8e'
-                      : isSel
-                        ? '#dc2626'
-                        : '#fff'
+                      : isLast
+                        ? '#22c55e'
+                        : isSel
+                          ? '#dc2626'
+                          : '#fff'
                 }
-                stroke={isSel ? '#dc2626' : '#1f4b8e'}
+                stroke={isSel ? '#dc2626' : isLast ? '#15803d' : '#1f4b8e'}
                 strokeWidth="2"
                 style={{
                   cursor:
@@ -924,16 +1070,16 @@ export function FloorPlanEditor() {
               pointerEvents="none"
               aria-label="人視点位置"
             >
-              {/* Direction arc */}
+              {/* Direction arrow (points toward camera's looking direction) */}
               <g transform={`rotate(${angleDeg})`}>
                 <line
                   x1={0} y1={0}
-                  x2={0} y2={-(R + arrowLen)}
+                  x2={0} y2={R + arrowLen}
                   stroke="#f59e0b"
                   strokeWidth={2.5}
                 />
                 <polygon
-                  points={`0,${-(R + arrowLen + 7)} -5,${-(R + arrowLen)} 5,${-(R + arrowLen)}`}
+                  points={`0,${R + arrowLen + 7} -5,${R + arrowLen} 5,${R + arrowLen}`}
                   fill="#f59e0b"
                 />
               </g>
@@ -959,8 +1105,8 @@ export function FloorPlanEditor() {
           (floor.outline.length === 0
             ? '部屋の頂点をクリックして配置してください。'
             : floor.outline.length < 3
-              ? `頂点 ${floor.outline.length}点。あと${3 - floor.outline.length}点以上必要です。`
-              : '始点をクリック、または「外周を閉じる」で確定します。')}
+              ? `頂点 ${floor.outline.length}点（緑＝直近）。あと${3 - floor.outline.length}点以上必要です。`
+              : '緑＝直近の頂点。始点(青)クリックまたは「外周を閉じる」で確定。赤い破線=交差するため追加できません。')}
         {tool === 'innerWall' &&
           (pendingInnerStart
             ? '終点をクリックしてください。'

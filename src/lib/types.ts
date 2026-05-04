@@ -77,6 +77,8 @@ export interface FloorPlan {
   height: number;
   wallColor: string;
   floorColor: string;
+  /** Wall transparency (0..1). Default 0.6. Forced to 1 in person view. */
+  wallOpacity?: number;
   backgroundImage?: BackgroundImage;
 }
 

@@ -1,5 +1,29 @@
-import type { FloorPlan, Furniture, Vec2 } from './types';
+import type { FloorPlan, Furniture, FurnitureType, Vec2 } from './types';
 import { innerEdges, outerEdges, pointInPolygon } from './geometry';
+
+/** Items allowed to overlap floor furniture (chair tucks under, others sit on top). */
+export const STACKABLE_TYPES: ReadonlySet<FurnitureType> = new Set<FurnitureType>([
+  'chair',
+  'microwave',
+  'tv',
+  'coffeeMaker',
+  'toaster',
+]);
+
+/** Stackable items that should be rendered on top of the supporting furniture. */
+export const ON_TOP_TYPES: ReadonlySet<FurnitureType> = new Set<FurnitureType>([
+  'microwave',
+  'tv',
+  'coffeeMaker',
+  'toaster',
+]);
+
+function canOverlap(a: Furniture, b: Furniture): boolean {
+  // Allow stackable + non-stackable overlap (chair under table, microwave on counter, etc.)
+  const aStack = STACKABLE_TYPES.has(a.type);
+  const bStack = STACKABLE_TYPES.has(b.type);
+  return aStack !== bStack;
+}
 
 export function getFurnitureCorners(f: Furniture): Vec2[] {
   const cos = Math.cos(f.rotationY);
@@ -114,8 +138,22 @@ export function isFurniturePlacementValid(
   }
   if (others) {
     for (const other of others) {
+      if (canOverlap(candidate, other)) continue;
       if (furnituresOverlap(candidate, other)) return false;
     }
   }
   return true;
+}
+
+/** Returns the top Y of the tallest non-stackable furniture this stackable rests on. 0 if none. */
+export function computeStackY(target: Furniture, others: Furniture[]): number {
+  if (!ON_TOP_TYPES.has(target.type)) return 0;
+  let topY = 0;
+  for (const o of others) {
+    if (STACKABLE_TYPES.has(o.type)) continue;
+    if (furnituresOverlap(target, o)) {
+      if (o.height > topY) topY = o.height;
+    }
+  }
+  return topY;
 }

@@ -104,6 +104,93 @@ export function midpoint(a: Vec2, b: Vec2): Vec2 {
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
 }
 
+function direction(a: Vec2, b: Vec2, c: Vec2): number {
+  return (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
+}
+
+/** Strict segment intersection (excludes shared endpoints / collinear touch). */
+export function segmentsIntersect(
+  a1: Vec2,
+  a2: Vec2,
+  b1: Vec2,
+  b2: Vec2,
+): boolean {
+  const d1 = direction(b1, b2, a1);
+  const d2 = direction(b1, b2, a2);
+  const d3 = direction(a1, a2, b1);
+  const d4 = direction(a1, a2, b2);
+  return (
+    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  );
+}
+
+/**
+ * Returns true if appending `p` to `outline` would create an edge
+ * (from outline[last] to p) that crosses an existing outline edge.
+ */
+export function outlineAppendWouldCross(outline: Vec2[], p: Vec2): boolean {
+  const n = outline.length;
+  if (n < 2) return false;
+  const a = outline[n - 1];
+  // Existing edges 0..n-2 (between consecutive points). Skip the last edge
+  // because it shares vertex outline[n-1] with the new one.
+  for (let i = 0; i < n - 2; i++) {
+    if (segmentsIntersect(a, p, outline[i], outline[i + 1])) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns true if inserting `p` between outline[anchorIdx] and
+ * outline[anchorIdx+1] (open polygon) would create a crossing with any
+ * non-adjacent existing edge.
+ *
+ * Skip rules are evaluated independently for each of the two new edges
+ * (a→p and p→next): we only skip an existing edge for the new edge that
+ * actually shares a vertex with it. This avoids over-skipping that would
+ * miss real crossings between e.g. p→next and a non-adjacent edge.
+ */
+export function outlineInsertWouldCross(
+  outline: Vec2[],
+  anchorIdx: number,
+  p: Vec2,
+): boolean {
+  const n = outline.length;
+  if (n < 2 || anchorIdx < 0 || anchorIdx >= n) return false;
+  const a = outline[anchorIdx];
+  const next = anchorIdx + 1 < n ? outline[anchorIdx + 1] : null;
+  for (let i = 0; i < n - 1; i++) {
+    const e1 = outline[i];
+    const e2 = outline[i + 1];
+    // Skip the edge being split (a→next) entirely; it's removed by insertion.
+    if (next && i === anchorIdx) continue;
+    // a→p: shares a with edges (anchor-1)→anchor and anchor→(anchor+1=split).
+    const skipForA = i === anchorIdx - 1;
+    // p→next: shares next with edges anchor→(anchor+1=split) and (anchor+1)→(anchor+2).
+    const skipForNext = i === anchorIdx + 1;
+    if (!skipForA && segmentsIntersect(a, p, e1, e2)) return true;
+    if (next && !skipForNext && segmentsIntersect(p, next, e1, e2)) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns true if closing the outline (last → first) would cross any
+ * non-adjacent existing edge.
+ */
+export function outlineCloseWouldCross(outline: Vec2[]): boolean {
+  const n = outline.length;
+  if (n < 4) return false; // triangle can't self-cross when closing
+  const a = outline[n - 1];
+  const b = outline[0];
+  // Skip first edge (shares b) and last edge (shares a).
+  for (let i = 1; i < n - 2; i++) {
+    if (segmentsIntersect(a, b, outline[i], outline[i + 1])) return true;
+  }
+  return false;
+}
+
 export function bbox(poly: Vec2[]): {
   minX: number;
   minZ: number;

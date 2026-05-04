@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { BackSide, DoubleSide, type ColorRepresentation } from 'three';
+import { BackSide, DoubleSide, FrontSide, type ColorRepresentation } from 'three';
 import type { Vec2 } from '../lib/types';
 import { computeWallSegments, type OpeningSpec } from '../lib/wallSegments';
 
@@ -12,6 +12,10 @@ interface WallProps {
   color: ColorRepresentation;
   /** outer = single-sided BackSide so camera outside sees through */
   variant: 'outer' | 'inner';
+  /** When true, walls are fully opaque and intercept pointer events. */
+  opaque?: boolean;
+  /** Opacity in non-opaque (normal) mode. 0..1. Default 0.6. */
+  opacity?: number;
 }
 
 export function Wall({
@@ -22,6 +26,8 @@ export function Wall({
   openings,
   color,
   variant,
+  opaque = false,
+  opacity = 0.6,
 }: WallProps) {
   const length = useMemo(() => {
     const dx = end.x - start.x;
@@ -40,10 +46,27 @@ export function Wall({
 
   if (length <= 0) return null;
 
+  const isOuter = variant === 'outer';
+  const side = opaque
+    ? isOuter
+      ? FrontSide
+      : DoubleSide
+    : isOuter
+      ? BackSide
+      : DoubleSide;
+
   return (
     <group
       position={[start.x, 0, start.z]}
       rotation={[0, angle - Math.PI / 2, 0]}
+      onPointerDown={
+        opaque
+          ? (e) => {
+              // Block clicks from passing through walls to furniture behind them.
+              e.stopPropagation();
+            }
+          : undefined
+      }
     >
       {segments.map((seg, i) => {
         const w = seg.u1 - seg.u0;
@@ -52,7 +75,6 @@ export function Wall({
         const cy = (seg.v0 + seg.v1) / 2;
 
         const t = thickness === 0 ? 0.08 : thickness;
-        const isOuter = variant === 'outer';
         return (
           <mesh
             key={i}
@@ -63,10 +85,10 @@ export function Wall({
             <boxGeometry args={[w, h, t]} />
             <meshStandardMaterial
               color={color}
-              side={isOuter ? BackSide : DoubleSide}
-              transparent
-              opacity={isOuter ? 0.6 : 0.75}
-              depthWrite={false}
+              side={side}
+              transparent={!opaque}
+              opacity={opaque ? 1 : opacity}
+              depthWrite={opaque || opacity >= 0.99}
             />
           </mesh>
         );
