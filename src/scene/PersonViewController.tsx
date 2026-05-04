@@ -50,9 +50,10 @@ export function PersonViewController() {
       mz /= len;
       const sin = Math.sin(rotationY);
       const cos = Math.cos(rotationY);
-      // forward = (sin, cos), right = (cos, -sin)  (z-axis flipped)
-      const dx = (sin * -mz + cos * mx) * MOVE_SPEED * delta;
-      const dz = (cos * -mz - sin * mx) * MOVE_SPEED * delta;
+      // forward (W: mz=-1) = (sin, cos)
+      // right   (D: mx=+1) = forward × up = (-cos, sin)  (camera looks +z, up=+y)
+      const dx = (sin * -mz - cos * mx) * MOVE_SPEED * delta;
+      const dz = (cos * -mz + sin * mx) * MOVE_SPEED * delta;
       const cur = posRef.current;
       const tryX = cur.x + dx;
       const tryZ = cur.z + dz;
