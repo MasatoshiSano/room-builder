@@ -18,6 +18,7 @@ import { useViewBox } from './use2DTransform';
 import { FurnitureLayer } from './FurnitureLayer';
 import { BackgroundImageLayer } from './BackgroundImageLayer';
 import { ClearanceOverlay } from './ClearanceOverlay';
+import { FloorRegionLayer } from './FloorRegionLayer';
 import { useTranslation } from '../lib/i18n';
 import { formatLength } from '../lib/units';
 import { FURNITURE_DRAG_MIME } from '../ui/tabs/FurnitureTab';
@@ -968,6 +969,12 @@ export function FloorPlanEditor() {
             </g>
           );
         })}
+
+        <FloorRegionLayer
+          transform={transform}
+          toWorldFromScreen={toWorldFromScreen}
+          enabled={tool === 'select'}
+        />
 
         <FurnitureLayer
           transform={transform}

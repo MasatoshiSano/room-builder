@@ -70,6 +70,38 @@ export interface BackgroundImage {
   locked: boolean;
 }
 
+export interface FloorPattern {
+  /** Plank direction in radians (0 = +x, π/2 = +z). */
+  direction: number;
+  /** Plank width in meters (across the grain). */
+  plankWidth: number;
+  /** Plank length in meters (along the grain). */
+  plankLength: number;
+  /** Base color of the planks. */
+  color: string;
+  /** Seam (groove) color between planks. */
+  seamColor: string;
+  /** Tone variance between planks 0..1. */
+  variation: number;
+}
+
+export interface FloorRegion {
+  id: string;
+  label: string;
+  /** Polygon in world (x,z) coords; CCW. */
+  polygon: Vec2[];
+  pattern: FloorPattern;
+}
+
+export const DEFAULT_FLOOR_PATTERN: FloorPattern = {
+  direction: 0,
+  plankWidth: 0.15,
+  plankLength: 1.8,
+  color: '#d4c8b3',
+  seamColor: '#8a7a5e',
+  variation: 0.18,
+};
+
 export interface FloorPlan {
   outline: Vec2[];
   innerWalls: InnerWall[];
@@ -80,6 +112,10 @@ export interface FloorPlan {
   /** Wall transparency (0..1). Default 0.6. Forced to 1 in person view. */
   wallOpacity?: number;
   backgroundImage?: BackgroundImage;
+  /** Default flooring pattern for the entire room. */
+  floorPattern?: FloorPattern;
+  /** Per-room flooring overrides (rendered on top of base). */
+  floorRegions?: FloorRegion[];
 }
 
 export interface Furniture {
@@ -100,7 +136,8 @@ export type SelectionKind =
   | 'innerWall'
   | 'opening'
   | 'furniture'
-  | 'backgroundImage';
+  | 'backgroundImage'
+  | 'floorRegion';
 
 export interface Selection {
   kind: SelectionKind;

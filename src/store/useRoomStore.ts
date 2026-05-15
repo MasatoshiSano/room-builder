@@ -2,9 +2,12 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { temporal } from 'zundo';
 import {
+  DEFAULT_FLOOR_PATTERN,
   type BackgroundImage,
   type EditorMode,
+  type FloorPattern,
   type FloorPlan,
+  type FloorRegion,
   type Furniture,
   type FurnitureType,
   type InnerWall,
@@ -32,6 +35,14 @@ import {
   idbPutState,
   revokeBlobObjectUrl,
 } from '../lib/persistence';
+import { serverClient } from '../lib/serverClient';
+import {
+  isOnline,
+  pullPlans,
+  pullState,
+  startSyncHeartbeat,
+  withSync,
+} from '../lib/syncStrategy';
 import { registerBuiltInShapes } from '../scene/shapes/registry';
 import type { Unit } from '../lib/units';
 
@@ -150,6 +161,18 @@ interface RoomStore {
   setFloorColor: (c: string) => void;
   setWallOpacity: (v: number) => void;
 
+  // flooring
+  setFloorPattern: (p: FloorPattern) => void;
+  patchFloorPattern: (patch: Partial<FloorPattern>) => void;
+  addFloorRegion: (
+    polygon: Vec2[],
+    label?: string,
+    pattern?: Partial<FloorPattern>,
+  ) => string;
+  updateFloorRegion: (id: string, patch: Partial<FloorRegion>) => void;
+  patchFloorRegionPattern: (id: string, patch: Partial<FloorPattern>) => void;
+  removeFloorRegion: (id: string) => void;
+
   // background image (now Blob-backed; src is "blob:<key>")
   setBackgroundImage: (img: BackgroundImage | undefined) => void;
   setBackgroundImageFromBlob: (
@@ -258,6 +281,52 @@ function isVec2(v: unknown): v is Vec2 {
   );
 }
 
+function sanitizeFloorPattern(raw: unknown): FloorPattern | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Partial<FloorPattern>;
+  return {
+    direction: typeof r.direction === 'number' ? r.direction : DEFAULT_FLOOR_PATTERN.direction,
+    plankWidth:
+      typeof r.plankWidth === 'number' && r.plankWidth > 0
+        ? r.plankWidth
+        : DEFAULT_FLOOR_PATTERN.plankWidth,
+    plankLength:
+      typeof r.plankLength === 'number' && r.plankLength > 0
+        ? r.plankLength
+        : DEFAULT_FLOOR_PATTERN.plankLength,
+    color: typeof r.color === 'string' ? r.color : DEFAULT_FLOOR_PATTERN.color,
+    seamColor:
+      typeof r.seamColor === 'string'
+        ? r.seamColor
+        : DEFAULT_FLOOR_PATTERN.seamColor,
+    variation:
+      typeof r.variation === 'number' && r.variation >= 0 && r.variation <= 1
+        ? r.variation
+        : DEFAULT_FLOOR_PATTERN.variation,
+  };
+}
+
+function sanitizeFloorRegions(raw: unknown): FloorRegion[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return (raw as unknown[])
+    .map((r): FloorRegion | null => {
+      if (!r || typeof r !== 'object') return null;
+      const x = r as Partial<FloorRegion>;
+      if (typeof x.id !== 'string') return null;
+      if (!Array.isArray(x.polygon)) return null;
+      const polygon = (x.polygon as unknown[]).filter(isVec2) as Vec2[];
+      if (polygon.length < 3) return null;
+      const pattern = sanitizeFloorPattern(x.pattern);
+      return {
+        id: x.id,
+        label: typeof x.label === 'string' ? x.label : '部屋',
+        polygon,
+        pattern: pattern ?? { ...DEFAULT_FLOOR_PATTERN },
+      };
+    })
+    .filter((r): r is FloorRegion => r !== null);
+}
+
 function sanitizeBackgroundImage(raw: unknown): BackgroundImage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Partial<SerializedBackgroundImage>;
@@ -355,6 +424,8 @@ function sanitizeFloor(raw: unknown): FloorPlan | null {
         ? r.wallOpacity
         : undefined,
     backgroundImage: sanitizeBackgroundImage(r.backgroundImage),
+    floorPattern: sanitizeFloorPattern(r.floorPattern),
+    floorRegions: sanitizeFloorRegions(r.floorRegions),
   };
 }
 
@@ -656,6 +727,73 @@ export const useRoomStore = create<RoomStore>()(
               ...s.floor,
               wallOpacity: Math.max(0.05, Math.min(1, v)),
             },
+          })),
+
+        setFloorPattern: (p) =>
+          set((s) => ({ floor: { ...s.floor, floorPattern: p } })),
+        patchFloorPattern: (patch) =>
+          set((s) => ({
+            floor: {
+              ...s.floor,
+              floorPattern: {
+                ...(s.floor.floorPattern ?? DEFAULT_FLOOR_PATTERN),
+                ...patch,
+              },
+            },
+          })),
+        addFloorRegion: (polygon, label, pattern) => {
+          const id = uid();
+          const region: FloorRegion = {
+            id,
+            label: label ?? '部屋',
+            polygon,
+            pattern: { ...DEFAULT_FLOOR_PATTERN, ...pattern },
+          };
+          set((s) => ({
+            floor: {
+              ...s.floor,
+              floorRegions: [...(s.floor.floorRegions ?? []), region],
+            },
+            selection: { kind: 'floorRegion', id },
+            selections: [{ kind: 'floorRegion', id }],
+          }));
+          return id;
+        },
+        updateFloorRegion: (id, patch) =>
+          set((s) => ({
+            floor: {
+              ...s.floor,
+              floorRegions: (s.floor.floorRegions ?? []).map((r) =>
+                r.id === id ? { ...r, ...patch } : r,
+              ),
+            },
+          })),
+        patchFloorRegionPattern: (id, patch) =>
+          set((s) => ({
+            floor: {
+              ...s.floor,
+              floorRegions: (s.floor.floorRegions ?? []).map((r) =>
+                r.id === id
+                  ? { ...r, pattern: { ...r.pattern, ...patch } }
+                  : r,
+              ),
+            },
+          })),
+        removeFloorRegion: (id) =>
+          set((s) => ({
+            floor: {
+              ...s.floor,
+              floorRegions: (s.floor.floorRegions ?? []).filter(
+                (r) => r.id !== id,
+              ),
+            },
+            selection:
+              s.selection?.kind === 'floorRegion' && s.selection.id === id
+                ? null
+                : s.selection,
+            selections: s.selections.filter(
+              (sel) => !(sel.kind === 'floorRegion' && sel.id === id),
+            ),
           })),
 
         setBackgroundImage: (img) =>
@@ -1198,50 +1336,128 @@ function roomCentroid(floor: FloorPlan): { x: number; z: number } {
 
 // ---------- async hydration from IDB ----------
 
-async function hydrateFromIDB(): Promise<void> {
+/**
+ * Hydration order:
+ *   1. Try the server (fresh, authoritative).
+ *   2. Fall back to IndexedDB cache (works offline).
+ *   3. Fall back to legacy localStorage (one-shot migration to IDB).
+ *
+ * Once we have data, we also do a one-shot migration: if the server is
+ * reachable but empty AND we have local data, push the local data up so
+ * the user doesn't lose anything when they first add the server.
+ */
+async function hydrateInitial(): Promise<void> {
+  // Kick off server heartbeat in parallel.
+  startSyncHeartbeat();
+
+  // 1) Try the server first.
+  let chosen: PersistedState | null = null;
+  let camefromServer = false;
   try {
-    const idbState = await idbGetState<PersistedState>();
-    if (idbState) {
-      const sanitized = sanitizePersisted(idbState);
-      if (sanitized) {
-        useRoomStore.setState({
-          floor: sanitized.floor,
-          furniture: sanitized.furniture,
-          editorMode:
-            sanitized.floor.outline.length >= 3 ? 'arrange' : 'plan',
-          tool: sanitized.floor.outline.length >= 3 ? 'select' : 'outline',
-          ready: true,
-        });
-        useRoomStore.temporal.getState().clear();
-        return;
+    const fromServer = await pullState<PersistedState>();
+    if (fromServer) {
+      const s = sanitizePersisted(fromServer);
+      if (s) {
+        chosen = s;
+        camefromServer = true;
       }
     }
-    // Fall back to (already loaded) localStorage and migrate to IDB.
+  } catch {
+    /* server unreachable, fall through */
+  }
+
+  // 2) Local IDB cache.
+  if (!chosen) {
+    try {
+      const fromIdb = await idbGetState<PersistedState>();
+      if (fromIdb) {
+        const s = sanitizePersisted(fromIdb);
+        if (s) chosen = s;
+      }
+    } catch {
+      /* IDB unavailable, fall through */
+    }
+  }
+
+  // 3) Legacy localStorage migration.
+  if (!chosen) {
     const cur = useRoomStore.getState();
     const migrated = await migrateBackgroundDataUrlToBlob({
       version: STATE_SCHEMA_VERSION,
       floor: cur.floor,
       furniture: cur.furniture,
     });
-    useRoomStore.setState({ floor: migrated.floor, ready: true });
-    await idbPutState(migrated);
-    useRoomStore.temporal.getState().clear();
-  } catch {
-    useRoomStore.setState({ ready: true });
-    useRoomStore.temporal.getState().clear();
+    chosen = migrated;
+    void idbPutState(migrated).catch(() => null);
   }
-  // Hydrate plans
+
+  if (chosen) {
+    useRoomStore.setState({
+      floor: chosen.floor,
+      furniture: chosen.furniture,
+      editorMode: chosen.floor.outline.length >= 3 ? 'arrange' : 'plan',
+      tool: chosen.floor.outline.length >= 3 ? 'select' : 'outline',
+      ready: true,
+    });
+  } else {
+    useRoomStore.setState({ ready: true });
+  }
+  useRoomStore.temporal.getState().clear();
+
+  // 4) Plans hydration: server first, then IDB.
+  let plans: SavedPlan[] | null = null;
   try {
-    const plans = await idbGetPlans<SavedPlan>();
-    if (plans && plans.length > 0) {
-      useRoomStore.setState({ savedPlans: plans });
-    } else {
-      // Migrate existing localStorage plans into IDB.
-      const cur = useRoomStore.getState().savedPlans;
-      if (cur.length > 0) await idbPutPlans(cur);
+    const fromServer = await pullPlans();
+    if (fromServer) {
+      plans = fromServer
+        .map((p) => {
+          const data = sanitizePersisted(p.data);
+          if (!data) return null;
+          return { id: p.id, name: p.name, savedAt: p.savedAt, data };
+        })
+        .filter((p): p is SavedPlan => p !== null);
     }
   } catch {
     /* ignore */
+  }
+  if (!plans) {
+    try {
+      const idbPlans = await idbGetPlans<SavedPlan>();
+      if (idbPlans) plans = idbPlans;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (plans !== null) useRoomStore.setState({ savedPlans: plans });
+
+  // 5) One-shot migration: if server reachable but server-side empty and
+  //    local has data, push local up.
+  if (camefromServer === false && isOnline()) {
+    const local = useRoomStore.getState();
+    const remoteState = await serverClient.getState<PersistedState>().catch(() => null);
+    if (remoteState === null) {
+      const payload: PersistedState = {
+        version: STATE_SCHEMA_VERSION,
+        floor: local.floor,
+        furniture: local.furniture,
+      };
+      await withSync(() => serverClient.putState(payload));
+    }
+    if (local.savedPlans.length > 0) {
+      const remotePlans = await serverClient.listPlans().catch(() => null);
+      if (remotePlans !== null && remotePlans.length === 0) {
+        await withSync(() =>
+          serverClient.replaceAllPlans(
+            local.savedPlans.map((p) => ({
+              id: p.id,
+              name: p.name,
+              savedAt: p.savedAt,
+              data: p.data,
+            })),
+          ),
+        );
+      }
+    }
   }
 }
 
@@ -1255,6 +1471,7 @@ function flushPersistNow(state: PersistedState): void {
     const json = JSON.stringify(state);
     if (json === lastSerialized) return;
     lastSerialized = json;
+    // 1) Local cache (offline-safe).
     void idbPutState(state).catch((e: unknown) => {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('IDB save failed:', msg);
@@ -1263,6 +1480,8 @@ function flushPersistNow(state: PersistedState): void {
           'IndexedDB への保存に失敗しました。背景画像のサイズを確認してください。',
       });
     });
+    // 2) Server (best-effort; sync layer manages status).
+    void withSync(() => serverClient.putState(state));
     if (useRoomStore.getState().persistError !== null) {
       useRoomStore.setState({ persistError: null });
     }
@@ -1290,6 +1509,17 @@ async function persistPlans(plans: SavedPlan[]): Promise<void> {
       persistError: '保存プランの書き込みに失敗しました（容量上限の可能性）。',
     });
   }
+  // Mirror plans to the server (best-effort).
+  void withSync(() =>
+    serverClient.replaceAllPlans(
+      plans.map((p) => ({
+        id: p.id,
+        name: p.name,
+        savedAt: p.savedAt,
+        data: p.data,
+      })),
+    ),
+  );
 }
 
 useRoomStore.subscribe(
@@ -1326,4 +1556,4 @@ if (typeof window !== 'undefined') {
 }
 
 // Kick off async hydration (don't block module init).
-void hydrateFromIDB();
+void hydrateInitial();

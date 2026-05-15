@@ -7,3 +7,8 @@ dist
 .omc
 .playwright-mcp
 qa-*.png
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

@@ -318,7 +318,12 @@ export function Scene() {
 
       {floor.outline.length >= 3 && (
         <>
-          <Floor outline={floor.outline} color={floor.floorColor} />
+          <Floor
+            outline={floor.outline}
+            color={floor.floorColor}
+            pattern={floor.floorPattern}
+            regions={floor.floorRegions}
+          />
           {shadowsEnabled && (
             <ContactShadows
               position={[cx, 0.005, cz]}

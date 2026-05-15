@@ -3,6 +3,7 @@ import { useRoomStore } from '../../store/useRoomStore';
 import { NumberField } from '../NumberField';
 import { SavedPlansSection } from '../SavedPlansSection';
 import { BackgroundImageSection } from '../BackgroundImageSection';
+import { FlooringSection } from '../FlooringSection';
 import { useTranslation } from '../../lib/i18n';
 
 export function PlanTab() {
@@ -71,6 +72,8 @@ export function PlanTab() {
           </span>
         </label>
       </section>
+
+      <FlooringSection />
 
       <BackgroundImageSection />
 
