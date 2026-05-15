@@ -1,6 +1,6 @@
 import { Html } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { useRoomStore } from '../store/useRoomStore';
 import {
@@ -9,10 +9,14 @@ import {
   outerEdges,
   pointInPolygon,
 } from '../lib/geometry';
+import type { FloorPlan, Vec2 } from '../lib/types';
 
 const LOOK_SPEED = 0.004;
 const PITCH_LIMIT = Math.PI / 2.2;
-const PERSON_RADIUS = 0.22;
+/** Person collision radius in meters (≈36cm shoulder, leaves clearance for 70cm doors). */
+const PERSON_RADIUS = 0.18;
+/** Doors at floor level (sillHeight ≤ this) are passable. */
+const DOOR_FLOOR_THRESHOLD = 0.05;
 
 export function PersonViewController() {
   const personView = useRoomStore((s) => s.personView);
@@ -26,6 +30,12 @@ export function PersonViewController() {
   const dragRef = useRef<{ startX: number; startY: number } | null>(null);
   const keysRef = useRef<Record<string, boolean>>({});
   const dirtyRef = useRef(false);
+
+  /**
+   * Pre-compute collidable wall sub-segments with door openings cut out.
+   * The person can pass through gaps where doors live at floor level.
+   */
+  const obstacles = useMemo(() => getWallObstacles(floor), [floor]);
 
   useEffect(() => {
     if (personView) {
@@ -69,15 +79,15 @@ export function PersonViewController() {
       const cur = posRef.current;
       const tryX = cur.x + dx;
       const tryZ = cur.z + dz;
-      const full = canStand(tryX, tryZ, floor);
+      const full = canStand(tryX, tryZ, floor, obstacles);
       if (full) {
         posRef.current = { x: tryX, z: tryZ };
         dirtyRef.current = true;
       } else {
-        if (canStand(tryX, cur.z, floor)) {
+        if (canStand(tryX, cur.z, floor, obstacles)) {
           posRef.current = { x: tryX, z: cur.z };
           dirtyRef.current = true;
-        } else if (canStand(cur.x, tryZ, floor)) {
+        } else if (canStand(cur.x, tryZ, floor, obstacles)) {
           posRef.current = { x: cur.x, z: tryZ };
           dirtyRef.current = true;
         }
@@ -221,30 +231,104 @@ export function PersonViewController() {
   );
 }
 
+interface WallObstacle {
+  start: Vec2;
+  end: Vec2;
+}
+
 function canStand(
   x: number,
   z: number,
-  floor: {
-    outline: { x: number; z: number }[];
-    innerWalls: {
-      id: string;
-      start: { x: number; z: number };
-      end: { x: number; z: number };
-    }[];
-  },
+  floor: Pick<FloorPlan, 'outline'>,
+  obstacles: WallObstacle[],
 ): boolean {
   if (floor.outline.length < 3) return true;
   if (!pointInPolygon({ x, z }, floor.outline)) return false;
-  const outer = outerEdges(floor.outline);
-  const inner = innerEdges(floor.innerWalls);
   const p = { x, z };
-  for (const e of outer) {
-    if (closestOnSegment(p, e.start, e.end).distance < PERSON_RADIUS)
-      return false;
-  }
-  for (const e of inner) {
+  for (const e of obstacles) {
     if (closestOnSegment(p, e.start, e.end).distance < PERSON_RADIUS)
       return false;
   }
   return true;
+}
+
+/**
+ * Build a list of wall sub-segments where the person can collide.
+ * Doors at floor level are *cut out* of the wall, so the person can walk
+ * through them. Windows (sillHeight > 0.05) and elevated openings remain
+ * solid at floor level.
+ */
+function getWallObstacles(floor: FloorPlan): WallObstacle[] {
+  const result: WallObstacle[] = [];
+
+  // Group passable openings (doors at floor level) by wall key.
+  const passableByEdge = new Map<string, { offset: number; width: number }[]>();
+  for (const op of floor.openings) {
+    if (op.kind !== 'door') continue;
+    if (op.sillHeight > DOOR_FLOOR_THRESHOLD) continue;
+    const key =
+      op.wallRef.type === 'outer'
+        ? `o:${op.wallRef.edgeIndex}`
+        : `i:${op.wallRef.wallId}`;
+    const list = passableByEdge.get(key) ?? [];
+    list.push({ offset: op.offset, width: op.width });
+    passableByEdge.set(key, list);
+  }
+
+  const cutEdge = (edge: { start: Vec2; end: Vec2; length: number }, key: string) => {
+    if (edge.length <= 0) {
+      result.push({ start: edge.start, end: edge.end });
+      return;
+    }
+    const ux = (edge.end.x - edge.start.x) / edge.length;
+    const uz = (edge.end.z - edge.start.z) / edge.length;
+    const at = (u: number): Vec2 => ({
+      x: edge.start.x + ux * u,
+      z: edge.start.z + uz * u,
+    });
+    const doors = (passableByEdge.get(key) ?? [])
+      .map((d) => ({
+        a: Math.max(0, Math.min(edge.length, d.offset)),
+        b: Math.max(0, Math.min(edge.length, d.offset + d.width)),
+      }))
+      .filter((d) => d.b > d.a)
+      .sort((a, b) => a.a - b.a);
+
+    if (doors.length === 0) {
+      result.push({ start: edge.start, end: edge.end });
+      return;
+    }
+
+    // Merge overlapping door intervals first.
+    const merged: { a: number; b: number }[] = [];
+    for (const d of doors) {
+      const last = merged[merged.length - 1];
+      if (last && d.a <= last.b) {
+        last.b = Math.max(last.b, d.b);
+      } else {
+        merged.push({ ...d });
+      }
+    }
+
+    let cursor = 0;
+    for (const d of merged) {
+      if (d.a > cursor) {
+        result.push({ start: at(cursor), end: at(d.a) });
+      }
+      cursor = d.b;
+    }
+    if (cursor < edge.length) {
+      result.push({ start: at(cursor), end: at(edge.length) });
+    }
+  };
+
+  for (const e of outerEdges(floor.outline)) {
+    if (e.ref.type !== 'outer') continue;
+    cutEdge(e, `o:${e.ref.edgeIndex}`);
+  }
+  for (const e of innerEdges(floor.innerWalls)) {
+    if (e.ref.type !== 'inner') continue;
+    cutEdge(e, `i:${e.ref.wallId}`);
+  }
+  return result;
 }

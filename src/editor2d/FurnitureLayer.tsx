@@ -298,11 +298,14 @@ export function FurnitureLayer({
                 onPointerDown={(e) => handlePointerDown(e, f)}
               />
             )}
+            {/* Front indicator: points to +z (local "front") so it stays
+                consistent with shape conventions in 3D — sofa seats / TV
+                screens / chair fronts all face +z when rotationY = 0. */}
             <line
               x1={0}
               y1={0}
               x2={0}
-              y2={-Math.min(d / 2, 18)}
+              y2={Math.min(d / 2, 18)}
               stroke={isSel ? '#1f4b8e' : '#555'}
               strokeWidth={1.5}
               pointerEvents="none"
