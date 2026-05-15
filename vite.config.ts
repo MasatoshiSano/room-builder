@@ -12,33 +12,8 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            // Group three + r3f + drei + three-stdlib together to avoid the
-            // circular-chunk warning (drei imports three internally).
-            if (
-              id.includes('three') ||
-              id.includes('@react-three') ||
-              id.includes('three-stdlib')
-            ) {
-              return 'three';
-            }
-            if (id.includes('@serendie')) return 'serendie';
-            if (
-              id.includes('zustand') ||
-              id.includes('zundo') ||
-              id.includes('idb')
-            ) {
-              return 'state';
-            }
-            return 'vendor';
-          }
-          return undefined;
-        },
-      },
-    },
+    chunkSizeWarningLimit: 1500,
+    // Let Rollup decide chunking. Manual splits caused circular-import TDZ
+    // errors at runtime (https://github.com/vitejs/vite/issues/14025).
   },
 });
