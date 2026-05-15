@@ -81,10 +81,21 @@ cat > "${TMP_WEB}" <<JSON
 JSON
 aws s3api put-bucket-website --bucket "${BUCKET}" --website-configuration "file://${TMP_WEB}"
 
-# 4) IP-restricted bucket policy
-echo "[4/6] Applying IP-restricted bucket policy (allow ${ALLOW_IP})..."
-TMP_POL="$(mktemp)"
-cat > "${TMP_POL}" <<JSON
+# 4) Bucket policy:
+#    - If a CloudFront distribution fronts this bucket (set up by
+#      aws-https-setup.sh), DO NOT overwrite the OAC policy — CloudFront
+#      would lose access. Just leave it.
+#    - Otherwise, apply IP-restricted public-read for direct S3-website use.
+EXISTING_DIST="$(aws cloudfront list-distributions \
+  --query "DistributionList.Items[?Comment=='room-builder ${BUCKET}'].Id" \
+  --output text 2>/dev/null || true)"
+if [ -n "${EXISTING_DIST}" ] && [ "${EXISTING_DIST}" != "None" ]; then
+  echo "[4/6] Skipping IP-public bucket policy — CloudFront distribution"
+  echo "      ${EXISTING_DIST} fronts this bucket (OAC policy preserved)."
+else
+  echo "[4/6] Applying IP-restricted bucket policy (allow ${ALLOW_IP})..."
+  TMP_POL="$(mktemp)"
+  cat > "${TMP_POL}" <<JSON
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -101,7 +112,8 @@ cat > "${TMP_POL}" <<JSON
   ]
 }
 JSON
-aws s3api put-bucket-policy --bucket "${BUCKET}" --policy "file://${TMP_POL}"
+  aws s3api put-bucket-policy --bucket "${BUCKET}" --policy "file://${TMP_POL}"
+fi
 
 # 5) Sync dist/ to the bucket
 echo "[5/6] Syncing dist/ → s3://${BUCKET}/ ..."
