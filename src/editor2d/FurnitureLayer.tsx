@@ -3,10 +3,11 @@ import { useRoomStore } from '../store/useRoomStore';
 import type { Furniture, Vec2 } from '../lib/types';
 import type { Transform2D } from './use2DTransform';
 import {
-  isFurniturePlacementValid,
+  checkPlacement,
   precomputeEdges,
   type PrecomputedEdges,
 } from '../lib/collision';
+import { getFurnitureMeta } from '../lib/furnitureRegistry';
 
 interface Props {
   transform: Transform2D;
@@ -17,11 +18,12 @@ interface Props {
 type DragState =
   | {
       kind: 'move';
-      id: string;
+      ids: string[];
+      origMap: Map<string, Furniture>;
       start: Vec2;
-      orig: Furniture;
       edges: PrecomputedEdges;
       others: Furniture[];
+      lastDelta: { dx: number; dz: number };
     }
   | {
       kind: 'resize';
@@ -31,31 +33,72 @@ type DragState =
       orig: Furniture;
       edges: PrecomputedEdges;
       others: Furniture[];
+      live: Partial<Furniture>;
     };
 
 const SCALE_HANDLE = 7;
 
-export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props) {
+export function FurnitureLayer({
+  transform,
+  toWorldFromScreen,
+  enabled,
+}: Props) {
   const furniture = useRoomStore((s) => s.furniture);
   const floor = useRoomStore((s) => s.floor);
   const selection = useRoomStore((s) => s.selection);
+  const selections = useRoomStore((s) => s.selections);
   const setSelection = useRoomStore((s) => s.setSelection);
+  const toggleInSelection = useRoomStore((s) => s.toggleInSelection);
   const updateFurniture = useRoomStore((s) => s.updateFurniture);
+  const translateFurnitures = useRoomStore((s) => s.translateFurnitures);
   const dragRef = useRef<DragState | null>(null);
-  const [dragInvalidId, setDragInvalidId] = useState<string | null>(null);
+  const [dragInvalidIds, setDragInvalidIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [liveOffsets, setLiveOffsets] = useState<Map<string, Vec2>>(
+    () => new Map(),
+  );
+  const [liveResize, setLiveResize] = useState<{
+    id: string;
+    width: number;
+    depth: number;
+    x: number;
+    z: number;
+  } | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent, f: Furniture) => {
     if (!enabled) return;
     e.stopPropagation();
-    setSelection({ kind: 'furniture', id: f.id });
+    const me = { kind: 'furniture' as const, id: f.id };
+    if (e.shiftKey) {
+      toggleInSelection(me);
+    } else {
+      const isAlreadyInGroup = selections.some(
+        (s) => s.kind === 'furniture' && s.id === f.id,
+      );
+      if (!isAlreadyInGroup || selections.length <= 1) {
+        setSelection(me);
+      }
+    }
+    const groupIds = useRoomStore
+      .getState()
+      .selections.filter((s) => s.kind === 'furniture')
+      .map((s) => s.id);
+    const ids = groupIds.includes(f.id) && groupIds.length > 1 ? groupIds : [f.id];
     const p = toWorldFromScreen(e.clientX, e.clientY, false);
+    const origMap = new Map<string, Furniture>();
+    for (const id of ids) {
+      const orig = furniture.find((x) => x.id === id);
+      if (orig) origMap.set(id, { ...orig });
+    }
     dragRef.current = {
       kind: 'move',
-      id: f.id,
+      ids,
+      origMap,
       start: p,
-      orig: { ...f },
       edges: precomputeEdges(floor),
-      others: furniture.filter((o) => o.id !== f.id),
+      others: furniture.filter((o) => !ids.includes(o.id)),
+      lastDelta: { dx: 0, dz: 0 },
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -84,6 +127,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
       orig: { ...f },
       edges: precomputeEdges(floor),
       others: furniture.filter((o) => o.id !== f.id),
+      live: {},
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -96,15 +140,21 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
     if (d.kind === 'move') {
       const dx = p.x - d.start.x;
       const dz = p.z - d.start.z;
-      const newX = d.orig.x + dx;
-      const newZ = d.orig.z + dz;
-      updateFurniture(d.id, {
-        x: newX,
-        z: newZ,
-      });
-      const candidate = { ...d.orig, x: newX, z: newZ };
-      const valid = isFurniturePlacementValid(candidate, floor, d.edges, d.others);
-      setDragInvalidId(valid ? null : d.id);
+      d.lastDelta = { dx, dz };
+      const offsets = new Map<string, Vec2>();
+      const invalidIds = new Set<string>();
+      for (const id of d.ids) {
+        const orig = d.origMap.get(id);
+        if (!orig) continue;
+        const cand = { ...orig, x: orig.x + dx, z: orig.z + dz };
+        offsets.set(id, { x: cand.x, z: cand.z });
+        // Validate against floor + the OTHER non-selected items
+        // (but allow overlap among selected siblings).
+        const v = checkPlacement(cand, floor, d.edges, d.others);
+        if (!v.valid) invalidIds.add(id);
+      }
+      setLiveOffsets(offsets);
+      setDragInvalidIds(invalidIds);
       return;
     }
 
@@ -121,45 +171,51 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
       const czLocal = lz / 2;
       const cxWorld = d.anchor.x + cxLocal * cos - czLocal * sin;
       const czWorld = d.anchor.z + cxLocal * sin + czLocal * cos;
-      updateFurniture(d.id, {
-        width: newW,
-        depth: newD,
-        x: cxWorld,
-        z: czWorld,
-      });
-      const candidate = {
+      d.live = { width: newW, depth: newD, x: cxWorld, z: czWorld };
+      setLiveResize({ id: d.id, width: newW, depth: newD, x: cxWorld, z: czWorld });
+      const cand = {
         ...d.orig,
         width: newW,
         depth: newD,
         x: cxWorld,
         z: czWorld,
       };
-      const valid = isFurniturePlacementValid(candidate, floor, d.edges, d.others);
-      setDragInvalidId(valid ? null : d.id);
+      const v = checkPlacement(cand, floor, d.edges, d.others);
+      setDragInvalidIds(v.valid ? new Set() : new Set([d.id]));
     }
   };
 
   const handlePointerUp = () => {
     const d = dragRef.current;
     if (!d) return;
-    // On drop: if invalid, revert to original.
-    const current = useRoomStore
-      .getState()
-      .furniture.find((x) => x.id === d.id);
-    if (current && !isFurniturePlacementValid(current, floor, d.edges, d.others)) {
-      if (d.kind === 'move') {
-        updateFurniture(d.id, { x: d.orig.x, z: d.orig.z });
-      } else {
-        updateFurniture(d.id, {
-          width: d.orig.width,
-          depth: d.orig.depth,
-          x: d.orig.x,
-          z: d.orig.z,
-        });
+    if (d.kind === 'move') {
+      const { dx, dz } = d.lastDelta;
+      // Verify all targets ended in valid positions; if any invalid, revert.
+      let allValid = true;
+      for (const id of d.ids) {
+        const orig = d.origMap.get(id);
+        if (!orig) continue;
+        const cand = { ...orig, x: orig.x + dx, z: orig.z + dz };
+        if (!checkPlacement(cand, floor, d.edges, d.others).valid) {
+          allValid = false;
+          break;
+        }
+      }
+      if (allValid && (dx !== 0 || dz !== 0)) {
+        translateFurnitures(d.ids, dx, dz);
+      }
+    } else {
+      // resize: commit if valid, else revert
+      const cand = { ...d.orig, ...d.live };
+      const v = checkPlacement(cand, floor, d.edges, d.others);
+      if (v.valid && d.live.width !== undefined) {
+        updateFurniture(d.id, d.live);
       }
     }
     dragRef.current = null;
-    setDragInvalidId(null);
+    setLiveOffsets(new Map());
+    setLiveResize(null);
+    setDragInvalidIds(new Set());
   };
 
   return (
@@ -171,11 +227,18 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
       {furniture.map((f) => {
         const isSel =
           selection?.kind === 'furniture' && selection.id === f.id;
-        const center = transform.toScreen({ x: f.x, z: f.z });
-        const w = f.width * transform.scale;
-        const d = f.depth * transform.scale;
+        const isInGroup =
+          selections.some((s) => s.kind === 'furniture' && s.id === f.id);
+        const liveOff = liveOffsets.get(f.id);
+        const liveR = liveResize?.id === f.id ? liveResize : null;
+        const x = liveOff ? liveOff.x : liveR ? liveR.x : f.x;
+        const z = liveOff ? liveOff.z : liveR ? liveR.z : f.z;
+        const w = (liveR ? liveR.width : f.width) * transform.scale;
+        const d = (liveR ? liveR.depth : f.depth) * transform.scale;
+        const center = transform.toScreen({ x, z });
         const angleDeg = (f.rotationY * 180) / Math.PI;
-        const isInvalid = dragInvalidId === f.id;
+        const isInvalid = dragInvalidIds.has(f.id);
+        const meta = getFurnitureMeta(f.type);
 
         return (
           <g
@@ -193,18 +256,18 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
                 pointerEvents="none"
               />
             )}
-            {isSel && !isInvalid && (
+            {isInGroup && !isInvalid && (
               <rect
                 x={-w / 2 - 4}
                 y={-d / 2 - 4}
                 width={w + 8}
                 height={d + 8}
-                fill="#22d3ee"
-                opacity={0.35}
+                fill={isSel ? '#22d3ee' : '#3b82f6'}
+                opacity={isSel ? 0.35 : 0.2}
                 pointerEvents="none"
               />
             )}
-            {f.type === 'roundTable' ? (
+            {meta.silhouette === 'ellipse' ? (
               <ellipse
                 cx={0}
                 cy={0}
@@ -244,7 +307,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
               strokeWidth={1.5}
               pointerEvents="none"
             />
-            {(w > 40 && d > 24) && (
+            {w > 40 && d > 24 && (
               <text
                 x={0}
                 y={4}
@@ -256,7 +319,7 @@ export function FurnitureLayer({ transform, toWorldFromScreen, enabled }: Props)
                 {f.label}
               </text>
             )}
-            {isSel && enabled && (
+            {isSel && enabled && selections.length <= 1 && (
               <>
                 {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => {
                   const cx =

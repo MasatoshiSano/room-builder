@@ -5,10 +5,11 @@ import { CompactNumberField } from './CompactNumberField';
 export function BackgroundImageSection() {
   const img = useRoomStore((s) => s.floor.backgroundImage);
   const setBg = useRoomStore((s) => s.setBackgroundImage);
+  const setBgFromBlob = useRoomStore((s) => s.setBackgroundImageFromBlob);
   const updateBg = useRoomStore((s) => s.updateBackgroundImage);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
@@ -17,44 +18,40 @@ export function BackgroundImageSection() {
       alert('対応していない画像形式です（PNG / JPEG / WebP のみ）');
       return;
     }
-    const MAX_BYTES = 8 * 1024 * 1024;
+    const MAX_BYTES = 16 * 1024 * 1024;
     if (f.size > MAX_BYTES) {
-      alert(`画像が大きすぎます（${(f.size / 1024 / 1024).toFixed(1)} MB）。8 MB 以下にしてください。`);
+      alert(
+        `画像が大きすぎます（${(f.size / 1024 / 1024).toFixed(1)} MB）。16 MB 以下にしてください。`,
+      );
       return;
     }
-    const reader = new FileReader();
-    reader.onerror = () => {
-      alert('画像の読み込みに失敗しました。');
-    };
-    reader.onload = () => {
-      const src = String(reader.result);
-      if (!/^data:image\/(png|jpeg|webp);base64,/.test(src)) {
-        alert('画像の読み込みに失敗しました（不正なデータ）。');
-        return;
-      }
-      const i = new Image();
-      i.onerror = () => {
-        alert('画像のデコードに失敗しました。');
-      };
-      i.onload = () => {
-        const aspect = i.width / i.height;
-        const widthM = 6;
-        const heightM = widthM / aspect;
-        setBg({
-          src,
-          x: 0,
-          z: 0,
-          width: widthM,
-          height: heightM,
-          rotation: 0,
-          opacity: 0.5,
-          visible: true,
-          locked: false,
-        });
-      };
-      i.src = src;
-    };
-    reader.readAsDataURL(f);
+    let aspect = 1;
+    try {
+      const url = URL.createObjectURL(f);
+      const i = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error('decode failed'));
+        im.src = url;
+      });
+      aspect = i.width / Math.max(1, i.height);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('画像のデコードに失敗しました。');
+      return;
+    }
+    const widthM = 6;
+    const heightM = widthM / aspect;
+    await setBgFromBlob(f, {
+      x: 0,
+      z: 0,
+      width: widthM,
+      height: heightM,
+      rotation: 0,
+      opacity: 0.5,
+      visible: true,
+      locked: false,
+    });
   };
 
   return (
@@ -113,14 +110,14 @@ export function BackgroundImageSection() {
           <div className="cnf-row-2">
             <CompactNumberField
               label="X"
-              unit="m"
+              followGlobalUnit
               value={img.x}
               step={0.05}
               onChange={(x) => updateBg({ x })}
             />
             <CompactNumberField
               label="Z"
-              unit="m"
+              followGlobalUnit
               value={img.z}
               step={0.05}
               onChange={(z) => updateBg({ z })}
@@ -129,7 +126,7 @@ export function BackgroundImageSection() {
           <div className="cnf-row-2">
             <CompactNumberField
               label="幅"
-              unit="m"
+              followGlobalUnit
               value={img.width}
               min={0.1}
               step={0.05}
@@ -137,7 +134,7 @@ export function BackgroundImageSection() {
             />
             <CompactNumberField
               label="高さ"
-              unit="m"
+              followGlobalUnit
               value={img.height}
               min={0.1}
               step={0.05}

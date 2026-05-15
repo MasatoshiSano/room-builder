@@ -15,9 +15,11 @@
     "@react-three/fiber": "^8.17.10",
     "@serendie/symbols": "^1.0.2",
     "@serendie/ui": "^3.2.2",
+    "idb": "^8.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0",
+    "zundo": "^2.3.0",
     "zustand": "^5.0.1"
   },
   "devDependencies": {

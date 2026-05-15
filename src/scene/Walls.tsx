@@ -7,16 +7,29 @@ interface WallsProps {
   floor: FloorPlan;
   /** When true, render walls fully opaque and block pointer events. */
   opaque?: boolean;
+  /** When true, outer walls cast shadows (allows window-beam effect). */
+  outerCastShadow?: boolean;
 }
 
-export function Walls({ floor, opaque = false }: WallsProps) {
+type OpeningSpecLite = {
+  offset: number;
+  width: number;
+  height: number;
+  sillHeight: number;
+  kind: 'door' | 'window';
+};
+
+export function Walls({
+  floor,
+  opaque = false,
+  outerCastShadow = false,
+}: WallsProps) {
   const outer = useMemo(() => outerEdges(floor.outline), [floor.outline]);
   const inner = useMemo(() => innerEdges(floor.innerWalls), [floor.innerWalls]);
 
   const groupedOuter = groupOpenings(floor.openings, 'outer');
   const groupedInner = groupOpenings(floor.openings, 'inner');
 
-  // User-controlled opacity (0..1). Default 0.6.
   const userOpacity =
     typeof floor.wallOpacity === 'number' ? floor.wallOpacity : 0.6;
 
@@ -40,6 +53,7 @@ export function Walls({ floor, opaque = false }: WallsProps) {
             variant="outer"
             opaque={opaque}
             opacity={userOpacity}
+            outerCastShadow={outerCastShadow}
           />
         );
       })}
@@ -85,15 +99,9 @@ function groupOpenings(
       width: o.width,
       height: o.height,
       sillHeight: o.sillHeight,
+      kind: o.kind,
     });
     map.set(key, list);
   }
   return map;
 }
-
-type OpeningSpecLite = {
-  offset: number;
-  width: number;
-  height: number;
-  sillHeight: number;
-};

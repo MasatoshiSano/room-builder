@@ -12,15 +12,20 @@ import {
   pointInPolygon,
   snapPoint,
 } from '../lib/geometry';
-import type { Vec2, WallRef } from '../lib/types';
+import { isOutlineSimple } from '../lib/collision';
+import type { FurnitureType, Vec2, WallRef } from '../lib/types';
 import { useViewBox } from './use2DTransform';
 import { FurnitureLayer } from './FurnitureLayer';
 import { BackgroundImageLayer } from './BackgroundImageLayer';
+import { ClearanceOverlay } from './ClearanceOverlay';
+import { useTranslation } from '../lib/i18n';
+import { formatLength } from '../lib/units';
+import { FURNITURE_DRAG_MIME } from '../ui/tabs/FurnitureTab';
 
 const WALL_HIT_RADIUS_PX = 8;
 
 type DragState =
-  | { kind: 'vertex'; id: number }
+  | { kind: 'vertex'; id: number; orig: Vec2 }
   | { kind: 'innerWallStart'; id: string }
   | { kind: 'innerWallEnd'; id: string }
   | { kind: 'opening'; id: string }
@@ -34,6 +39,13 @@ type DragState =
 
 const SNAP_PX = 14;
 const BODY_DRAG_THRESHOLD_PX = 4;
+
+// ---------- exposed SVG ref for SVG export ----------
+const svgExportRef: { current: SVGSVGElement | null } = { current: null };
+
+export function getFloorPlanSvg(): SVGSVGElement | null {
+  return svgExportRef.current;
+}
 
 export function FloorPlanEditor() {
   const floor = useRoomStore((s) => s.floor);
@@ -54,16 +66,11 @@ export function FloorPlanEditor() {
   const personView = useRoomStore((s) => s.personView);
   const setPersonView = useRoomStore((s) => s.setPersonView);
   const setEditorMode = useRoomStore((s) => s.setEditorMode);
+  const settings = useRoomStore((s) => s.settings);
+  const addFurniture = useRoomStore((s) => s.addFurniture);
 
   const personPlacing = useRoomStore((s) => s.personPlacing);
   const setPersonPlacing = useRoomStore((s) => s.setPersonPlacing);
-  /**
-   * In-progress person-view placement (active during a single drag while
-   * personPlacing). `start` is the chosen world position; `current` is the
-   * pointer's current world position used to derive the direction arrow.
-   * Backed by a ref so synchronous pointerdown→move→up sequences see the
-   * latest value (React state would lag a render behind).
-   */
   const placementRef = useRef<{ start: Vec2; current: Vec2 } | null>(null);
   const [personPlacement, setPersonPlacement] = useState<{
     start: Vec2;
@@ -74,12 +81,33 @@ export function FloorPlanEditor() {
     setPersonPlacement(next);
   };
 
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [pendingInnerStart, setPendingInnerStart] = useState<Vec2 | null>(null);
   const [hoverPoint, setHoverPoint] = useState<Vec2 | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [vertexInvalid, setVertexInvalid] = useState(false);
+  const [dropPreview, setDropPreview] = useState<{
+    x: number;
+    z: number;
+    type: FurnitureType;
+  } | null>(null);
+  const [marquee, setMarquee] = useState<{
+    start: Vec2;
+    current: Vec2;
+  } | null>(null);
+  const marqueeRef = useRef<{ start: Vec2 } | null>(null);
+
+  useEffect(() => {
+    svgExportRef.current = svgRef.current;
+    return () => {
+      if (svgExportRef.current === svgRef.current) {
+        svgExportRef.current = null;
+      }
+    };
+  });
 
   useEffect(() => {
     const el = containerRef.current;
@@ -133,13 +161,11 @@ export function FloorPlanEditor() {
     size.height,
   );
 
-  // Keep refs to the latest callbacks so the non-passive event handlers below
-  // don't need to be re-registered on every render.
   const zoomByRef = useRef(zoomBy);
-  useEffect(() => { zoomByRef.current = zoomBy; });
+  useEffect(() => {
+    zoomByRef.current = zoomBy;
+  });
 
-  // Attach non-passive wheel/touch listeners so we can call preventDefault()
-  // and prevent the browser from zooming the page during pinch gestures.
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
@@ -239,8 +265,7 @@ export function FloorPlanEditor() {
     for (const op of floor.openings) {
       const edge = allEdges.find((ed) =>
         op.wallRef.type === 'outer'
-          ? ed.ref.type === 'outer' &&
-            ed.ref.edgeIndex === op.wallRef.edgeIndex
+          ? ed.ref.type === 'outer' && ed.ref.edgeIndex === op.wallRef.edgeIndex
           : ed.ref.type === 'inner' && ed.ref.wallId === op.wallRef.wallId,
       );
       if (!edge || edge.length === 0) continue;
@@ -278,9 +303,39 @@ export function FloorPlanEditor() {
     return snap ? snapPoint(w, gridSize) : w;
   };
 
+  // ---------- HTML5 drag/drop from sidebar ----------
+  const onContainerDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(FURNITURE_DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const w = transform.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+    setDropPreview({
+      x: w.x,
+      z: w.z,
+      type: useRoomStore.getState().draggingFurnitureType ?? 'box',
+    });
+  };
+  const onContainerDragLeave = () => setDropPreview(null);
+  const onContainerDrop = (e: React.DragEvent) => {
+    const t = e.dataTransfer.getData(FURNITURE_DRAG_MIME);
+    if (!t) return;
+    e.preventDefault();
+    const svg = svgRef.current;
+    if (!svg) {
+      setDropPreview(null);
+      return;
+    }
+    const rect = svg.getBoundingClientRect();
+    const w = transform.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+    addFurniture(t as FurnitureType, { x: w.x, z: w.z });
+    setDropPreview(null);
+  };
+
   const handleSvgPointerDown = (e: React.PointerEvent) => {
-    if (e.button === 1 || e.button === 2 || (tool === 'select' && e.shiftKey)) {
-      // Middle/right click, or Shift+click in select mode → pan
+    if (e.button === 1 || e.button === 2 || (tool === 'select' && e.shiftKey && e.altKey)) {
       e.preventDefault();
       panRef.current = {
         pointerId: e.pointerId,
@@ -295,7 +350,6 @@ export function FloorPlanEditor() {
     const p = getSvgPoint(e);
 
     if (tool === 'outline') {
-      // Click near the first vertex to close (only if it wouldn't cross).
       if (
         floor.outline.length >= 3 &&
         distance(p, floor.outline[0]) < gridSize * 1.5
@@ -306,8 +360,6 @@ export function FloorPlanEditor() {
         closeOutline();
         return;
       }
-      // If a vertex is selected, insert the new point AFTER it (branch from
-      // selected); otherwise append to the chain end.
       const selectedIdx =
         selection?.kind === 'vertex' ? Number(selection.id) : -1;
       const useInsert =
@@ -325,7 +377,6 @@ export function FloorPlanEditor() {
         return;
       }
       appendOutlineVertex(p);
-      // Move selection to the just-added vertex so further clicks chain naturally.
       setSelection({ kind: 'vertex', id: String(floor.outline.length) });
       return;
     }
@@ -379,8 +430,14 @@ export function FloorPlanEditor() {
     }
 
     if (tool === 'select') {
-      // 背景パン＋選択解除は、SVG 自身がターゲットの場合のみ
       if (e.target !== e.currentTarget) return;
+      // Shift+drag (without Alt) on background → marquee select
+      if (e.shiftKey && !e.altKey) {
+        marqueeRef.current = { start: p };
+        setMarquee({ start: p, current: p });
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+        return;
+      }
       panRef.current = {
         pointerId: e.pointerId,
         startSX: e.clientX,
@@ -397,7 +454,6 @@ export function FloorPlanEditor() {
       const dyPx = e.clientY - panRef.current.startSY;
       panRef.current.startSX = e.clientX;
       panRef.current.startSY = e.clientY;
-      // Convert pixel delta to world delta (account for rotation)
       const ix = -dxPx / transform.scale;
       const iy = -dyPx / transform.scale;
       const cos = Math.cos(transform.rotation);
@@ -411,10 +467,21 @@ export function FloorPlanEditor() {
     const p = getSvgPoint(e);
     setHoverPoint(p);
 
+    if (marqueeRef.current) {
+      setMarquee({ start: marqueeRef.current.start, current: p });
+      return;
+    }
+
     if (!drag) return;
 
     if (drag.kind === 'vertex') {
-      updateVertex(drag.id, p);
+      // Validate: is the resulting outline still simple?
+      const candidate = floor.outline.map((v, i) => (i === drag.id ? p : v));
+      const ok = isOutlineSimple(candidate);
+      setVertexInvalid(!ok);
+      if (ok) {
+        updateVertex(drag.id, p);
+      }
     } else if (drag.kind === 'innerWallStart') {
       updateInnerWall(drag.id, { start: p });
     } else if (drag.kind === 'innerWallEnd') {
@@ -447,17 +514,34 @@ export function FloorPlanEditor() {
 
   const handlePointerUp = () => {
     panRef.current = null;
+    if (marqueeRef.current && marquee) {
+      const { start, current } = marquee;
+      const minX = Math.min(start.x, current.x);
+      const maxX = Math.max(start.x, current.x);
+      const minZ = Math.min(start.z, current.z);
+      const maxZ = Math.max(start.z, current.z);
+      const allFurn = useRoomStore.getState().furniture;
+      const hits = allFurn
+        .filter(
+          (f) =>
+            f.x >= minX && f.x <= maxX && f.z >= minZ && f.z <= maxZ,
+        )
+        .map((f) => ({ kind: 'furniture' as const, id: f.id }));
+      useRoomStore.getState().setSelections(hits);
+      marqueeRef.current = null;
+      setMarquee(null);
+      return;
+    }
+    if (drag?.kind === 'vertex' && vertexInvalid) {
+      updateVertex(drag.id, drag.orig);
+    }
     setDrag(null);
+    setVertexInvalid(false);
   };
 
-  const beginVertexDrag = (
-    e: React.PointerEvent,
-    vertexIndex: number,
-  ) => {
+  const beginVertexDrag = (e: React.PointerEvent, vertexIndex: number) => {
     e.stopPropagation();
     if (tool === 'outline') {
-      // Clicking the first vertex while drawing closes the polygon
-      // (if not already closed and the close edge wouldn't cross).
       if (
         vertexIndex === 0 &&
         !isOutlineClosed &&
@@ -466,13 +550,16 @@ export function FloorPlanEditor() {
         if (!outlineCloseWouldCross(floor.outline)) closeOutline();
         return;
       }
-      // Otherwise: select the vertex so further clicks branch from here.
       setSelection({ kind: 'vertex', id: String(vertexIndex) });
       return;
     }
     if (tool !== 'select') return;
     setSelection({ kind: 'vertex', id: String(vertexIndex) });
-    setDrag({ kind: 'vertex', id: vertexIndex });
+    setDrag({
+      kind: 'vertex',
+      id: vertexIndex,
+      orig: { ...floor.outline[vertexIndex] },
+    });
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
@@ -491,10 +578,7 @@ export function FloorPlanEditor() {
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
-  const beginInnerBodyDrag = (
-    e: React.PointerEvent,
-    wallId: string,
-  ) => {
+  const beginInnerBodyDrag = (e: React.PointerEvent, wallId: string) => {
     e.stopPropagation();
     if (tool !== 'select') return;
     setSelection({ kind: 'innerWall', id: wallId });
@@ -543,40 +627,43 @@ export function FloorPlanEditor() {
 
   const isOutlineClosed = floor.outline.length >= 3;
 
+  const helpText = (() => {
+    if (tool === 'outline') {
+      if (floor.outline.length === 0) return t('help.outline.empty');
+      if (floor.outline.length < 3)
+        return t('help.outline.few', {
+          n: floor.outline.length,
+          rem: 3 - floor.outline.length,
+        });
+      return t('help.outline.ready');
+    }
+    if (tool === 'innerWall')
+      return pendingInnerStart
+        ? t('help.innerWall.end')
+        : t('help.innerWall.start');
+    if (tool === 'door') return t('help.door');
+    if (tool === 'window') return t('help.window');
+    if (personPlacing) return t('help.personPlace');
+    return t('help.select');
+  })();
+
   return (
-    <div ref={containerRef} className="floor-editor">
+    <div
+      ref={containerRef}
+      className="floor-editor"
+      onDragOver={onContainerDragOver}
+      onDragLeave={onContainerDragLeave}
+      onDrop={onContainerDrop}
+    >
       <div className="floor-editor-toolbar">
-        <ToolButton
-          label="選択"
-          active={tool === 'select'}
-          onClick={() => setTool('select')}
-        />
-        <ToolButton
-          label="外周描画"
-          active={tool === 'outline'}
-          onClick={() => setTool('outline')}
-        />
-        <ToolButton
-          label="内壁"
-          active={tool === 'innerWall'}
-          onClick={() => setTool('innerWall')}
-          disabled={!isOutlineClosed}
-        />
-        <ToolButton
-          label="ドア"
-          active={tool === 'door'}
-          onClick={() => setTool('door')}
-          disabled={!isOutlineClosed}
-        />
-        <ToolButton
-          label="窓"
-          active={tool === 'window'}
-          onClick={() => setTool('window')}
-          disabled={!isOutlineClosed}
-        />
+        <ToolButton label={t('tool.select')} active={tool === 'select'} onClick={() => setTool('select')} />
+        <ToolButton label={t('tool.outline')} active={tool === 'outline'} onClick={() => setTool('outline')} />
+        <ToolButton label={t('tool.innerWall')} active={tool === 'innerWall'} onClick={() => setTool('innerWall')} disabled={!isOutlineClosed} />
+        <ToolButton label={t('tool.door')} active={tool === 'door'} onClick={() => setTool('door')} disabled={!isOutlineClosed} />
+        <ToolButton label={t('tool.window')} active={tool === 'window'} onClick={() => setTool('window')} disabled={!isOutlineClosed} />
         {isOutlineClosed && (
           <ToolButton
-            label="👤 人視点"
+            label={t('header.personView')}
             active={personPlacing || !!personView}
             onClick={() => {
               if (personView) {
@@ -585,7 +672,6 @@ export function FloorPlanEditor() {
                 setPersonPlacement(null);
                 return;
               }
-              // Enter placement mode: user clicks a position and drags to set facing.
               setPersonPlacing(true);
               setPersonPlacement(null);
             }}
@@ -608,7 +694,7 @@ export function FloorPlanEditor() {
             }}
             title="直前/選択中の頂点を取り消し（Backspace）"
           >
-            ↶ 1点戻す
+            {t('tool.popOne')}
           </button>
         )}
         {tool === 'outline' && floor.outline.length >= 3 && (() => {
@@ -621,49 +707,17 @@ export function FloorPlanEditor() {
                 if (!wouldCross) closeOutline();
               }}
               disabled={wouldCross}
-              title={wouldCross ? '閉じる線が他の辺と交差します' : '外周を閉じる'}
+              title={wouldCross ? '閉じる線が他の辺と交差します' : t('tool.closeOutline')}
             >
-              外周を閉じる
+              {t('tool.closeOutline')}
             </button>
           );
         })()}
         <div className="view-controls">
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => zoomBy(1.25)}
-            title="拡大"
-            aria-label="拡大"
-          >
-            ＋
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => zoomBy(0.8)}
-            title="縮小"
-            aria-label="縮小"
-          >
-            －
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => rotate90()}
-            title="ビューを90°回転"
-            aria-label="ビューを90°回転"
-          >
-            ↻ 90°
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            onClick={() => resetView()}
-            title="ビューをリセット（全体表示）"
-            aria-label="ビューをリセット"
-          >
-            ⌖
-          </button>
+          <button type="button" className="tool-btn" onClick={() => zoomBy(1.25)} title={t('tool.zoomIn')} aria-label={t('tool.zoomIn')}>＋</button>
+          <button type="button" className="tool-btn" onClick={() => zoomBy(0.8)} title={t('tool.zoomOut')} aria-label={t('tool.zoomOut')}>－</button>
+          <button type="button" className="tool-btn" onClick={() => rotate90()} title={t('tool.rotate90')} aria-label={t('tool.rotate90')}>↻ 90°</button>
+          <button type="button" className="tool-btn" onClick={() => resetView()} title={t('tool.resetView')} aria-label={t('tool.resetView')}>⌖</button>
         </div>
       </div>
 
@@ -679,7 +733,7 @@ export function FloorPlanEditor() {
         onPointerCancel={handlePointerUp}
         onContextMenu={(e) => e.preventDefault()}
         role="img"
-        aria-label="2D 間取りエディタ"
+        aria-label={t('app.canvasArea')}
       >
         <Grid
           width={size.width}
@@ -906,7 +960,6 @@ export function FloorPlanEditor() {
                   if (tool === 'select') {
                     beginOpeningDrag(e, op.id);
                   } else if (tool === 'door' || tool === 'window') {
-                    // 既存の開口をクリック→新規作成せず選択
                     e.stopPropagation();
                     setSelection({ kind: 'opening', id: op.id });
                   }
@@ -921,6 +974,10 @@ export function FloorPlanEditor() {
           toWorldFromScreen={toWorldFromScreen}
           enabled={tool === 'select'}
         />
+
+        {settings.showClearance && (
+          <ClearanceOverlay transform={transform} />
+        )}
 
         {floor.outline.map((v, i) => {
           const s = transform.toScreen(v);
@@ -953,7 +1010,7 @@ export function FloorPlanEditor() {
                   cx={s.x}
                   cy={s.y}
                   r={14}
-                  fill="#22d3ee"
+                  fill={vertexInvalid ? '#dc2626' : '#22d3ee'}
                   opacity={0.45}
                   pointerEvents="none"
                 />
@@ -1011,7 +1068,11 @@ export function FloorPlanEditor() {
         })}
 
         {isOutlineClosed && (
-          <DimensionLabels outline={floor.outline} transform={transform} />
+          <DimensionLabels
+            outline={floor.outline}
+            transform={transform}
+            unit={settings.unit}
+          />
         )}
 
         {floor.innerWalls.map((w) => {
@@ -1028,7 +1089,7 @@ export function FloorPlanEditor() {
               fill="#5a4a3a"
               pointerEvents="none"
             >
-              {len.toFixed(2)}m
+              {formatLength(len, settings.unit)}
             </text>
           );
         })}
@@ -1046,7 +1107,33 @@ export function FloorPlanEditor() {
           </text>
         )}
 
-        {/* Capture overlay: intercepts pointer events while placing a person */}
+        {/* Marquee selection rectangle */}
+        {marquee && (() => {
+          const a = transform.toScreen(marquee.start);
+          const b = transform.toScreen(marquee.current);
+          return (
+            <rect
+              className="marquee-rect"
+              x={Math.min(a.x, b.x)}
+              y={Math.min(a.y, b.y)}
+              width={Math.abs(a.x - b.x)}
+              height={Math.abs(a.y - b.y)}
+            />
+          );
+        })()}
+
+        {/* D&D drop preview circle */}
+        {dropPreview && (() => {
+          const c = transform.toScreen({ x: dropPreview.x, z: dropPreview.z });
+          return (
+            <g pointerEvents="none">
+              <circle cx={c.x} cy={c.y} r={20} fill="#1f4b8e" opacity={0.2} />
+              <circle cx={c.x} cy={c.y} r={6} fill="#1f4b8e" />
+            </g>
+          );
+        })()}
+
+        {/* Person placement overlay */}
         {personPlacing && (
           <rect
             x={0}
@@ -1092,7 +1179,6 @@ export function FloorPlanEditor() {
           />
         )}
 
-        {/* Placement preview: arrow from start position to cursor */}
         {personPlacing && personPlacement && (() => {
           const valid = pointInPolygon(personPlacement.start, floor.outline);
           const color = valid ? '#f59e0b' : '#dc2626';
@@ -1107,14 +1193,7 @@ export function FloorPlanEditor() {
               <circle cx={a.x} cy={a.y} r={9} fill={color} stroke="white" strokeWidth={2} />
               {showArrow && (
                 <>
-                  <line
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={color}
-                    strokeWidth={3}
-                  />
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={3} />
                   {(() => {
                     const ux = dx / len;
                     const uy = dy / len;
@@ -1139,7 +1218,6 @@ export function FloorPlanEditor() {
           );
         })()}
 
-        {/* Person view marker */}
         {personView && (() => {
           const c = transform.toScreen({ x: personView.x, z: personView.z });
           const angleDeg = (personView.rotationY * 180) / Math.PI;
@@ -1151,53 +1229,35 @@ export function FloorPlanEditor() {
               pointerEvents="none"
               aria-label="人視点位置"
             >
-              {/* Direction arrow (points toward camera's looking direction) */}
               <g transform={`rotate(${angleDeg})`}>
-                <line
-                  x1={0} y1={0}
-                  x2={0} y2={R + arrowLen}
-                  stroke="#f59e0b"
-                  strokeWidth={2.5}
-                />
-                <polygon
-                  points={`0,${R + arrowLen + 7} -5,${R + arrowLen} 5,${R + arrowLen}`}
-                  fill="#f59e0b"
-                />
+                <line x1={0} y1={0} x2={0} y2={R + arrowLen} stroke="#f59e0b" strokeWidth={2.5} />
+                <polygon points={`0,${R + arrowLen + 7} -5,${R + arrowLen} 5,${R + arrowLen}`} fill="#f59e0b" />
               </g>
-              {/* Body circle */}
               <circle cx={0} cy={0} r={R} fill="#f59e0b" stroke="white" strokeWidth={2} />
-              {/* Person icon */}
-              <text
-                x={0} y={4}
-                textAnchor="middle"
-                fontSize="11"
-                fill="white"
-                fontWeight="bold"
-              >
-                人
-              </text>
+              <text x={0} y={4} textAnchor="middle" fontSize="11" fill="white" fontWeight="bold">人</text>
             </g>
           );
         })()}
       </svg>
 
+      {personPlacing && (
+        <div className="placement-cancel-bar">
+          <button
+            type="button"
+            className="qbtn is-danger"
+            onClick={() => {
+              setPersonPlacing(false);
+              setPersonPlacement(null);
+            }}
+            title="人視点の配置をキャンセル (Esc)"
+          >
+            ✕ {t('header.personView.cancelPlace')}
+          </button>
+        </div>
+      )}
+
       <p className="floor-editor-help" aria-live="polite">
-        {tool === 'outline' &&
-          (floor.outline.length === 0
-            ? '部屋の頂点をクリックして配置してください。'
-            : floor.outline.length < 3
-              ? `頂点 ${floor.outline.length}点（緑＝直近）。あと${3 - floor.outline.length}点以上必要です。`
-              : '緑＝直近の頂点。始点(青)クリックまたは「外周を閉じる」で確定。赤い破線=交差するため追加できません。')}
-        {tool === 'innerWall' &&
-          (pendingInnerStart
-            ? '終点をクリックしてください。'
-            : '始点をクリックしてください。')}
-        {tool === 'door' && '配置したい壁をクリックしてください。'}
-        {tool === 'window' && '外壁をクリックしてください。'}
-        {tool === 'select' &&
-          '頂点・壁・開口・家具をドラッグで編集。背景ドラッグでパン、ホイールでズーム。'}
-        {personPlacing &&
-          '人視点の配置: 床面をクリックして開始位置を決め、そのままドラッグして向きを示し、離すと 3D 人視点に切り替わります。'}
+        {helpText}
       </p>
     </div>
   );
@@ -1317,9 +1377,11 @@ function OutlinePath({
 function DimensionLabels({
   outline,
   transform,
+  unit,
 }: {
   outline: Vec2[];
   transform: { toScreen: (p: Vec2) => { x: number; y: number } };
+  unit: 'm' | 'cm' | 'mm';
 }) {
   return (
     <g aria-hidden="true">
@@ -1339,7 +1401,7 @@ function DimensionLabels({
             fill="#1f4b8e"
             pointerEvents="none"
           >
-            {len.toFixed(2)}m
+            {formatLength(len, unit)}
           </text>
         );
       })}

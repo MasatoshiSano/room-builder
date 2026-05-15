@@ -3,6 +3,7 @@ import { useRoomStore } from '../../store/useRoomStore';
 import { NumberField } from '../NumberField';
 import { SavedPlansSection } from '../SavedPlansSection';
 import { BackgroundImageSection } from '../BackgroundImageSection';
+import { useTranslation } from '../../lib/i18n';
 
 export function PlanTab() {
   const floor = useRoomStore((s) => s.floor);
@@ -16,13 +17,16 @@ export function PlanTab() {
   const loadSample = useRoomStore((s) => s.loadSample);
   const resetAll = useRoomStore((s) => s.resetAll);
   const selection = useRoomStore((s) => s.selection);
+  const { t } = useTranslation();
 
   return (
     <div className="tab-content">
       <section className="panel" aria-labelledby="plan-dim">
-        <h3 id="plan-dim" className="panel-title">部屋の設定</h3>
+        <h3 id="plan-dim" className="panel-title">
+          {t('panel.room')}
+        </h3>
         <NumberField
-          label="天井高"
+          label={t('panel.ceilingHeight')}
           unit="m"
           value={floor.height}
           min={1.8}
@@ -31,27 +35,27 @@ export function PlanTab() {
           onChange={(h) => setFloorHeight(h)}
         />
         <label className="color-row">
-          <span>壁の色</span>
+          <span>{t('panel.wallColor')}</span>
           <input
             type="color"
             value={floor.wallColor}
             onChange={(e) => setWallColor(e.target.value)}
-            aria-label="壁の色"
+            aria-label={t('panel.wallColor')}
           />
           <span aria-hidden="true">{floor.wallColor}</span>
         </label>
         <label className="color-row">
-          <span>床の色</span>
+          <span>{t('panel.floorColor')}</span>
           <input
             type="color"
             value={floor.floorColor}
             onChange={(e) => setFloorColor(e.target.value)}
-            aria-label="床の色"
+            aria-label={t('panel.floorColor')}
           />
           <span aria-hidden="true">{floor.floorColor}</span>
         </label>
         <label className="color-row">
-          <span>壁の透明度</span>
+          <span>{t('panel.wallOpacity')}</span>
           <input
             type="range"
             min={0.05}
@@ -59,7 +63,7 @@ export function PlanTab() {
             step={0.05}
             value={floor.wallOpacity ?? 0.6}
             onChange={(e) => setWallOpacity(Number(e.target.value))}
-            aria-label="壁の透明度（人視点では常に不透明）"
+            aria-label={t('panel.wallOpacity')}
             style={{ flex: 1 }}
           />
           <span aria-hidden="true">
@@ -73,17 +77,15 @@ export function PlanTab() {
       <SavedPlansSection />
 
       <section className="panel" aria-labelledby="plan-quick">
-        <h3 id="plan-quick" className="panel-title">クイックスタート</h3>
+        <h3 id="plan-quick" className="panel-title">
+          {t('panel.quickStart')}
+        </h3>
         <p className="empty-hint">
           サンプルを読み込むか、テンプレートから始めて頂点をドラッグで調整できます。
         </p>
         <div className="button-row">
-          <Button
-            styleType="filled"
-            size="small"
-            onClick={() => loadSample()}
-          >
-            サンプルを読込（1LDK）
+          <Button styleType="filled" size="small" onClick={() => loadSample()}>
+            {t('panel.sample')}
           </Button>
         </div>
         <div className="button-row">
@@ -101,7 +103,7 @@ export function PlanTab() {
               setSelection(null);
             }}
           >
-            正方形 4×4m
+            {t('panel.square4x4')}
           </Button>
           <Button
             styleType="outlined"
@@ -119,7 +121,7 @@ export function PlanTab() {
               setSelection(null);
             }}
           >
-            L字
+            {t('panel.lShape')}
           </Button>
           <Button
             styleType="ghost"
@@ -130,17 +132,17 @@ export function PlanTab() {
               setSelection(null);
             }}
           >
-            クリア
+            {t('panel.clear')}
           </Button>
         </div>
       </section>
 
       <section className="panel" aria-labelledby="plan-vertices">
         <h3 id="plan-vertices" className="panel-title">
-          頂点 ({floor.outline.length})
+          {t('panel.vertices')} ({floor.outline.length})
         </h3>
         {floor.outline.length === 0 ? (
-          <p className="empty-hint">ツールバーの「外周描画」で頂点を打つ、または上のクイックスタートを使用。</p>
+          <p className="empty-hint">{t('panel.empty.vertices')}</p>
         ) : (
           <ul className="item-list" role="list">
             {floor.outline.map((v, i) => {
@@ -173,7 +175,7 @@ export function PlanTab() {
 
       <section className="panel" aria-labelledby="plan-inner">
         <h3 id="plan-inner" className="panel-title">
-          内壁 ({floor.innerWalls.length})
+          {t('panel.innerWalls')} ({floor.innerWalls.length})
         </h3>
         {floor.innerWalls.length === 0 ? (
           <p className="empty-hint">「内壁」ツールで線を引いて部屋を分割できます。</p>
@@ -192,7 +194,11 @@ export function PlanTab() {
                       setSelection({ kind: 'innerWall', id: w.id })
                     }
                   >
-                    <span className="item-color-dot" aria-hidden="true" style={{background:'#5a4a3a'}}/>
+                    <span
+                      className="item-color-dot"
+                      aria-hidden="true"
+                      style={{ background: '#5a4a3a' }}
+                    />
                     <span className="item-label">
                       内壁
                       <span className="item-type">
@@ -208,10 +214,18 @@ export function PlanTab() {
       </section>
 
       <section className="panel">
-        <h3 className="panel-title">リセット</h3>
+        <h3 className="panel-title">{t('panel.reset')}</h3>
         <div className="button-row">
-          <Button styleType="outlined" size="small" onClick={resetAll}>
-            すべてクリア
+          <Button
+            styleType="outlined"
+            size="small"
+            onClick={() => {
+              if (window.confirm(t('confirm.resetAll'))) {
+                resetAll();
+              }
+            }}
+          >
+            {t('panel.resetAll')}
           </Button>
         </div>
       </section>

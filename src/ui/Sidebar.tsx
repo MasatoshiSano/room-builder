@@ -3,9 +3,11 @@ import { useState } from 'react';
 import { PlanTab } from './tabs/PlanTab';
 import { OpeningsTab } from './tabs/OpeningsTab';
 import { FurnitureTab } from './tabs/FurnitureTab';
+import { useTranslation } from '../lib/i18n';
 
 export function Sidebar() {
   const [tab, setTab] = useState('plan');
+  const { t } = useTranslation();
 
   return (
     <aside className="sidebar" aria-label="編集パネル">
@@ -14,9 +16,9 @@ export function Sidebar() {
           value={tab}
           onValueChange={(e: { value: string }) => setTab(e.value)}
         >
-          <TabItem value="plan" title="間取り" />
-          <TabItem value="openings" title="ドア・窓" />
-          <TabItem value="furniture" title="家具" />
+          <TabItem value="plan" title={t('sidebar.tab.plan')} />
+          <TabItem value="openings" title={t('sidebar.tab.openings')} />
+          <TabItem value="furniture" title={t('sidebar.tab.furniture')} />
         </Tabs>
       </div>
       <div className="tab-host">

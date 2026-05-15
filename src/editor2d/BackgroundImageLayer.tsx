@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 import type { BackgroundImage, Vec2 } from '../lib/types';
 import type { Transform2D } from './use2DTransform';
+import { getBlobObjectUrl } from '../lib/persistence';
 
 interface Props {
   transform: Transform2D;
@@ -19,14 +20,41 @@ type DragState =
 
 const HANDLE = 7;
 
+/** Resolve `data:` (legacy) or `blob-key:<key>` to a usable image href. */
+function useResolvedSrc(src: string | undefined): string | null {
+  const [resolved, setResolved] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!src) {
+      setResolved(null);
+      return;
+    }
+    if (src.startsWith('data:')) {
+      setResolved(src);
+      return;
+    }
+    if (src.startsWith('blob-key:')) {
+      const key = src.slice('blob-key:'.length);
+      void getBlobObjectUrl(key).then((url) => {
+        if (!cancelled) setResolved(url);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+  return resolved;
+}
+
 export function BackgroundImageLayer({ transform, toWorldFromScreen }: Props) {
   const img = useRoomStore((s) => s.floor.backgroundImage);
   const update = useRoomStore((s) => s.updateBackgroundImage);
   const selection = useRoomStore((s) => s.selection);
   const setSelection = useRoomStore((s) => s.setSelection);
   const dragRef = useRef<DragState | null>(null);
+  const resolvedSrc = useResolvedSrc(img?.src);
 
-  if (!img || !img.visible) return null;
+  if (!img || !img.visible || !resolvedSrc) return null;
 
   const isSel = selection?.kind === 'backgroundImage';
   const editable = !img.locked;
@@ -41,11 +69,7 @@ export function BackgroundImageLayer({ transform, toWorldFromScreen }: Props) {
     e.stopPropagation();
     setSelection({ kind: 'backgroundImage', id: 'bg' });
     const p = toWorldFromScreen(e.clientX, e.clientY, false);
-    dragRef.current = {
-      kind: 'move',
-      start: p,
-      orig: { ...img },
-    };
+    dragRef.current = { kind: 'move', start: p, orig: { ...img } };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
@@ -70,12 +94,7 @@ export function BackgroundImageLayer({ transform, toWorldFromScreen }: Props) {
       x: img.x + anchorLocal.x * cos - anchorLocal.z * sin,
       z: img.z + anchorLocal.x * sin + anchorLocal.z * cos,
     };
-    dragRef.current = {
-      kind: 'resize',
-      corner,
-      anchor,
-      orig: { ...img },
-    };
+    dragRef.current = { kind: 'resize', corner, anchor, orig: { ...img } };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
@@ -116,7 +135,7 @@ export function BackgroundImageLayer({ transform, toWorldFromScreen }: Props) {
     >
       <g transform={`translate(${center.x},${center.y}) rotate(${angleDeg})`}>
         <image
-          href={img.src}
+          href={resolvedSrc}
           x={-w / 2}
           y={-h / 2}
           width={w}

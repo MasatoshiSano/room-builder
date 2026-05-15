@@ -31,7 +31,12 @@ export function Floor({ outline, color }: FloorProps) {
 
   return (
     <mesh geometry={geometry} receiveShadow>
-      <meshStandardMaterial color={color} side={DoubleSide} />
+      <meshStandardMaterial
+        color={color}
+        side={DoubleSide}
+        roughness={0.85}
+        metalness={0.05}
+      />
     </mesh>
   );
 }

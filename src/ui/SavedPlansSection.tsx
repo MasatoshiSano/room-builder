@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
+import { useTranslation } from '../lib/i18n';
 
 export function SavedPlansSection() {
   const savedPlans = useRoomStore((s) => s.savedPlans);
@@ -10,6 +11,7 @@ export function SavedPlansSection() {
   const renamePlan = useRoomStore((s) => s.renamePlan);
   const exportSavedPlans = useRoomStore((s) => s.exportSavedPlans);
   const importSavedPlans = useRoomStore((s) => s.importSavedPlans);
+  const { t } = useTranslation();
 
   const [name, setName] = useState('');
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -34,40 +36,42 @@ export function SavedPlansSection() {
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-importing the same file
+    e.target.value = '';
     if (!file) return;
     let text: string;
     try {
       text = await file.text();
     } catch {
-      alert('ファイルの読み込みに失敗しました');
+      alert(t('plans.fileReadErr'));
       return;
     }
     const replace =
-      savedPlans.length > 0 &&
-      confirm(
-        '既存の保存プランを置き換えますか？\n  OK = 置き換え（既存は消えます）\n  キャンセル = 既存に追加（マージ）',
-      );
+      savedPlans.length > 0 && confirm(t('plans.replaceQ'));
     const result = importSavedPlans(text, replace ? 'replace' : 'merge');
     if (result.error) {
-      alert(`インポート失敗: ${result.error}`);
+      alert(t('plans.importErr', { error: result.error }));
     } else {
-      alert(`インポート完了: ${result.added} 件追加 / ${result.skipped} 件スキップ`);
+      alert(
+        t('plans.imported', {
+          added: result.added,
+          skipped: result.skipped,
+        }),
+      );
     }
   };
 
   return (
     <section className="panel" aria-labelledby="saved-plans">
       <h3 id="saved-plans" className="panel-title">
-        保存した間取り ({savedPlans.length})
+        {t('plans.title')} ({savedPlans.length})
       </h3>
 
       <div className="save-row">
         <input
           type="text"
           className="cnf-input full"
-          placeholder="プラン名（任意）"
-          aria-label="保存名"
+          placeholder={t('plans.namePlaceholder')}
+          aria-label={t('plans.namePlaceholder')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
@@ -85,7 +89,7 @@ export function SavedPlansSection() {
             setName('');
           }}
         >
-          保存
+          {t('plans.save')}
         </button>
       </div>
 
@@ -95,17 +99,17 @@ export function SavedPlansSection() {
           className="qbtn"
           onClick={handleExport}
           disabled={savedPlans.length === 0}
-          title="保存プランを JSON ファイルにダウンロード"
+          title={t('plans.exportTitle')}
         >
-          ⤓ エクスポート
+          {t('plans.export')}
         </button>
         <button
           type="button"
           className="qbtn"
           onClick={handleImportClick}
-          title="JSON ファイルから読み込み"
+          title={t('plans.importTitle')}
         >
-          ⤒ インポート
+          {t('plans.import')}
         </button>
         <input
           ref={fileInputRef}
@@ -117,7 +121,7 @@ export function SavedPlansSection() {
       </div>
 
       {savedPlans.length === 0 ? (
-        <p className="empty-hint">まだ保存された間取りはありません。</p>
+        <p className="empty-hint">{t('plans.empty')}</p>
       ) : (
         <ul className="item-list" role="list">
           {savedPlans.map((p) => {
@@ -172,11 +176,11 @@ export function SavedPlansSection() {
                       className="qbtn"
                       onClick={() => {
                         const safeName = String(p.name).replace(/\s+/g, ' ').slice(0, 40);
-                        if (confirm(`「${safeName}」に上書き保存しますか？`)) {
+                        if (confirm(t('plans.overwriteQ', { name: safeName }))) {
                           overwritePlan(p.id);
                         }
                       }}
-                      title="上書き保存"
+                      title={t('plans.overwrite')}
                     >
                       ↑
                     </button>
@@ -187,7 +191,7 @@ export function SavedPlansSection() {
                         setRenameId(p.id);
                         setRenameDraft(p.name);
                       }}
-                      title="名前を変更"
+                      title={t('plans.rename')}
                     >
                       ✎
                     </button>
@@ -196,11 +200,11 @@ export function SavedPlansSection() {
                       className="qbtn is-danger"
                       onClick={() => {
                         const safeName = String(p.name).replace(/\s+/g, ' ').slice(0, 40);
-                        if (confirm(`「${safeName}」を削除しますか？`)) {
+                        if (confirm(t('plans.deleteQ', { name: safeName }))) {
                           deletePlan(p.id);
                         }
                       }}
-                      title="削除"
+                      title={t('plans.delete')}
                     >
                       ✕
                     </button>

@@ -38,14 +38,14 @@ export function TopSelectionBar() {
       <>
         <CompactNumberField
           label="X"
-          unit="m"
+          followGlobalUnit
           value={v.x}
           step={0.05}
           onChange={(x) => updateVertex(idx, { ...v, x })}
         />
         <CompactNumberField
           label="Z"
-          unit="m"
+          followGlobalUnit
           value={v.z}
           step={0.05}
           onChange={(z) => updateVertex(idx, { ...v, z })}
@@ -74,7 +74,7 @@ export function TopSelectionBar() {
       <>
         <CompactNumberField
           label="始点X"
-          unit="m"
+          followGlobalUnit
           value={w.start.x}
           step={0.05}
           onChange={(x) =>
@@ -83,7 +83,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="始点Z"
-          unit="m"
+          followGlobalUnit
           value={w.start.z}
           step={0.05}
           onChange={(z) =>
@@ -92,14 +92,14 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="終点X"
-          unit="m"
+          followGlobalUnit
           value={w.end.x}
           step={0.05}
           onChange={(x) => updateInnerWall(w.id, { end: { ...w.end, x } })}
         />
         <CompactNumberField
           label="終点Z"
-          unit="m"
+          followGlobalUnit
           value={w.end.z}
           step={0.05}
           onChange={(z) => updateInnerWall(w.id, { end: { ...w.end, z } })}
@@ -136,7 +136,7 @@ export function TopSelectionBar() {
       <>
         <CompactNumberField
           label="位置"
-          unit="m"
+          followGlobalUnit
           value={op.offset}
           min={0}
           max={Math.max(0, wallLen - op.width)}
@@ -145,7 +145,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="幅"
-          unit="m"
+          followGlobalUnit
           value={op.width}
           min={0.3}
           max={Math.max(0.3, wallLen - op.offset)}
@@ -154,7 +154,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="高さ"
-          unit="m"
+          followGlobalUnit
           value={op.height}
           min={0.3}
           max={Math.max(0.3, floor.height - op.sillHeight)}
@@ -164,7 +164,7 @@ export function TopSelectionBar() {
         {op.kind === 'window' && (
           <CompactNumberField
             label="床上高"
-            unit="m"
+            followGlobalUnit
             value={op.sillHeight}
             min={0}
             max={Math.max(0, floor.height - op.height)}
@@ -194,21 +194,21 @@ export function TopSelectionBar() {
       <>
         <CompactNumberField
           label="X"
-          unit="m"
+          followGlobalUnit
           value={bg.x}
           step={0.05}
           onChange={(x) => updateBg({ x })}
         />
         <CompactNumberField
           label="Z"
-          unit="m"
+          followGlobalUnit
           value={bg.z}
           step={0.05}
           onChange={(z) => updateBg({ z })}
         />
         <CompactNumberField
           label="幅"
-          unit="m"
+          followGlobalUnit
           value={bg.width}
           min={0.1}
           step={0.05}
@@ -216,7 +216,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="高さ"
-          unit="m"
+          followGlobalUnit
           value={bg.height}
           min={0.1}
           step={0.05}
@@ -268,7 +268,7 @@ export function TopSelectionBar() {
       <>
         <CompactNumberField
           label="幅"
-          unit="m"
+          followGlobalUnit
           value={f.width}
           min={0.1}
           step={0.05}
@@ -276,7 +276,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="奥行"
-          unit="m"
+          followGlobalUnit
           value={f.depth}
           min={0.1}
           step={0.05}
@@ -284,7 +284,7 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="高さ"
-          unit="m"
+          followGlobalUnit
           value={f.height}
           min={0.1}
           step={0.05}
@@ -292,14 +292,14 @@ export function TopSelectionBar() {
         />
         <CompactNumberField
           label="X"
-          unit="m"
+          followGlobalUnit
           value={f.x}
           step={0.05}
           onChange={(x) => updateFurniture(f.id, { x })}
         />
         <CompactNumberField
           label="Z"
-          unit="m"
+          followGlobalUnit
           value={f.z}
           step={0.05}
           onChange={(z) => updateFurniture(f.id, { z })}

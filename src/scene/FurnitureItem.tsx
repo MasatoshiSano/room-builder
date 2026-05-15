@@ -1,96 +1,27 @@
 import { Html } from '@react-three/drei';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Group, Plane, Raycaster, Vector2, Vector3 } from 'three';
 import { useThree, type ThreeEvent } from '@react-three/fiber';
 import { useRoomStore } from '../store/useRoomStore';
-import type { Furniture } from '../lib/types';
+import type { Furniture, Selection } from '../lib/types';
 import {
+  checkPlacement,
   computeStackY,
-  isFurniturePlacementValid,
   precomputeEdges,
   type PrecomputedEdges,
 } from '../lib/collision';
-import { BoxShape } from './shapes/Box';
-import { SofaShape } from './shapes/Sofa';
-import { BedShape } from './shapes/Bed';
-import { TableShape } from './shapes/Table';
-import { RoundTableShape } from './shapes/RoundTable';
-import { DeskShape } from './shapes/Desk';
-import { NightstandShape } from './shapes/Nightstand';
-import { ChairShape } from './shapes/Chair';
-import { ShelfShape } from './shapes/Shelf';
-import { CupboardShape } from './shapes/Cupboard';
-import { TvBoardShape } from './shapes/TvBoard';
-import { TvShape } from './shapes/Tv';
-import { PlantShape } from './shapes/Plant';
-import { KitchenSinkShape } from './shapes/KitchenSink';
-import { StoveShape } from './shapes/Stove';
-import { RefrigeratorShape } from './shapes/Refrigerator';
-import { MicrowaveShape } from './shapes/Microwave';
-import { ToasterShape } from './shapes/Toaster';
-import { CoffeeMakerShape } from './shapes/CoffeeMaker';
-import { RiceCookerShape } from './shapes/RiceCooker';
-import { WashingMachineShape } from './shapes/WashingMachine';
-import { WashBasinShape } from './shapes/WashBasin';
+import { getFurnitureMeta } from '../lib/furnitureRegistry';
 
 interface FurnitureItemProps {
   furniture: Furniture;
   isSelected: boolean;
+  isMultiSelected: boolean;
   resizing: boolean;
   setResizing: (v: boolean) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
-}
-
-function ShapeFor({ furniture }: { furniture: Furniture }) {
-  const { type, width, depth, height, color } = furniture;
-  switch (type) {
-    case 'sofa':
-      return <SofaShape width={width} depth={depth} height={height} color={color} />;
-    case 'bed':
-      return <BedShape width={width} depth={depth} height={height} color={color} />;
-    case 'table':
-      return <TableShape width={width} depth={depth} height={height} color={color} />;
-    case 'roundTable':
-      return <RoundTableShape width={width} depth={depth} height={height} color={color} />;
-    case 'desk':
-      return <DeskShape width={width} depth={depth} height={height} color={color} />;
-    case 'nightstand':
-      return <NightstandShape width={width} depth={depth} height={height} color={color} />;
-    case 'chair':
-      return <ChairShape width={width} depth={depth} height={height} color={color} />;
-    case 'shelf':
-      return <ShelfShape width={width} depth={depth} height={height} color={color} />;
-    case 'cupboard':
-      return <CupboardShape width={width} depth={depth} height={height} color={color} />;
-    case 'tvBoard':
-      return <TvBoardShape width={width} depth={depth} height={height} color={color} />;
-    case 'tv':
-      return <TvShape width={width} depth={depth} height={height} color={color} />;
-    case 'plant':
-      return <PlantShape width={width} depth={depth} height={height} color={color} />;
-    case 'kitchenSink':
-      return <KitchenSinkShape width={width} depth={depth} height={height} color={color} />;
-    case 'stove':
-      return <StoveShape width={width} depth={depth} height={height} color={color} />;
-    case 'refrigerator':
-      return <RefrigeratorShape width={width} depth={depth} height={height} color={color} />;
-    case 'microwave':
-      return <MicrowaveShape width={width} depth={depth} height={height} color={color} />;
-    case 'toaster':
-      return <ToasterShape width={width} depth={depth} height={height} color={color} />;
-    case 'coffeeMaker':
-      return <CoffeeMakerShape width={width} depth={depth} height={height} color={color} />;
-    case 'riceCooker':
-      return <RiceCookerShape width={width} depth={depth} height={height} color={color} />;
-    case 'washingMachine':
-      return <WashingMachineShape width={width} depth={depth} height={height} color={color} />;
-    case 'washBasin':
-      return <WashBasinShape width={width} depth={depth} height={height} color={color} />;
-    case 'box':
-    default:
-      return <BoxShape width={width} depth={depth} height={height} color={color} />;
-  }
+  /** ids of furniture currently highlighted as collision blockers */
+  blockerHighlight: boolean;
 }
 
 const FLOOR_PLANE = new Plane(new Vector3(0, 1, 0), 0);
@@ -105,31 +36,50 @@ const CORNER_SIGN: Record<Corner, { x: number; z: number }> = {
   se: { x: 1, z: 1 },
 };
 
+function ShapeFor({ furniture }: { furniture: Furniture }) {
+  const meta = getFurnitureMeta(furniture.type);
+  const Shape = meta.Shape;
+  return (
+    <Shape
+      width={furniture.width}
+      depth={furniture.depth}
+      height={furniture.height}
+      color={furniture.color}
+    />
+  );
+}
+
 export function FurnitureItem({
   furniture,
   isSelected,
+  isMultiSelected,
   resizing,
   setResizing,
   onDragStart,
   onDragEnd,
+  blockerHighlight,
 }: FurnitureItemProps) {
   const groupRef = useRef<Group>(null);
   const setSelection = useRoomStore((s) => s.setSelection);
+  const toggleInSelection = useRoomStore((s) => s.toggleInSelection);
+  const selections = useRoomStore((s) => s.selections);
   const updateFurniture = useRoomStore((s) => s.updateFurniture);
   const removeFurniture = useRoomStore((s) => s.removeFurniture);
   const duplicateFurniture = useRoomStore((s) => s.duplicateFurniture);
+  const translateFurnitures = useRoomStore((s) => s.translateFurnitures);
   const allFurniture = useRoomStore((s) => s.furniture);
   const personView = useRoomStore((s) => s.personView);
   const { camera, gl, size } = useThree();
 
   const [isDragging, setIsDragging] = useState(false);
+  const [liveInvalid, setLiveInvalid] = useState(false);
 
-  const stackY = (() => {
+  const stackY = useMemo(() => {
+    if (!getFurnitureMeta(furniture.type).stacking.onTop) return 0;
     const others = allFurniture.filter((x) => x.id !== furniture.id);
     return computeStackY(furniture, others);
-  })();
+  }, [furniture, allFurniture]);
 
-  // Resize state (for the corner handles in <Html>)
   const resizeRef = useRef<{
     pointerId: number;
     corner: Corner;
@@ -137,7 +87,6 @@ export function FurnitureItem({
     origRotation: number;
   } | null>(null);
 
-  // Sync visual position when furniture data changes and we are NOT dragging
   useEffect(() => {
     if (groupRef.current && !isDragging) {
       groupRef.current.position.set(furniture.x, stackY, furniture.z);
@@ -162,22 +111,41 @@ export function FurnitureItem({
     if (resizing) return;
     if (e.nativeEvent.button !== 0) return;
     e.stopPropagation();
-    setSelection({ kind: 'furniture', id: furniture.id });
+
+    const me: Selection = { kind: 'furniture', id: furniture.id };
+    const shift = e.nativeEvent.shiftKey;
+    if (shift) {
+      toggleInSelection(me);
+    } else {
+      const isAlreadyInGroup = selections.some(
+        (s) => s.kind === 'furniture' && s.id === furniture.id,
+      );
+      if (!isAlreadyInGroup || selections.length <= 1) {
+        setSelection(me);
+      }
+    }
+
     const hit = screenToFloor(e.nativeEvent.clientX, e.nativeEvent.clientY);
     if (!hit) return;
 
     const pointerId = e.nativeEvent.pointerId;
     const startX = e.nativeEvent.clientX;
     const startY = e.nativeEvent.clientY;
-    const offset = {
-      dx: furniture.x - hit.x,
-      dz: furniture.z - hit.z,
-    };
-    // Snapshot of current furniture for collision tests + last valid position
+    const offset = { dx: furniture.x - hit.x, dz: furniture.z - hit.z };
     const fSnapshot = { ...furniture };
     const floorSnapshot = useRoomStore.getState().floor;
     const edgesSnapshot: PrecomputedEdges = precomputeEdges(floorSnapshot);
-    const othersSnapshot = useRoomStore.getState().furniture.filter((f) => f.id !== furniture.id);
+    const groupIds = useRoomStore
+      .getState()
+      .selections.filter((s) => s.kind === 'furniture')
+      .map((s) => s.id);
+    const isGroupDrag = groupIds.length > 1 && groupIds.includes(furniture.id);
+    const groupSnapshot = isGroupDrag
+      ? useRoomStore.getState().furniture.filter((f) => groupIds.includes(f.id))
+      : [fSnapshot];
+    const othersSnapshot = useRoomStore
+      .getState()
+      .furniture.filter((f) => !groupSnapshot.some((g) => g.id === f.id));
     let lastValid = { x: fSnapshot.x, z: fSnapshot.z };
     let moved = false;
 
@@ -196,42 +164,39 @@ export function FurnitureItem({
       const nx = h.x + offset.dx;
       const nz = h.z + offset.dz;
 
-      // Try full move; if invalid, try axis-decoupled moves to slide along walls.
-      const tryFull = isFurniturePlacementValid(
-        { ...fSnapshot, x: nx, z: nz },
+      const cand = { ...fSnapshot, x: nx, z: nz };
+      const tryFull = checkPlacement(
+        cand,
         floorSnapshot,
         edgesSnapshot,
         othersSnapshot,
       );
       let applyX = lastValid.x;
       let applyZ = lastValid.z;
-      if (tryFull) {
+      let invalid = false;
+      if (tryFull.valid) {
         applyX = nx;
         applyZ = nz;
       } else {
-        const tryX = isFurniturePlacementValid(
+        const tryX = checkPlacement(
           { ...fSnapshot, x: nx, z: lastValid.z },
           floorSnapshot,
           edgesSnapshot,
           othersSnapshot,
         );
-        const tryZ = isFurniturePlacementValid(
+        const tryZ = checkPlacement(
           { ...fSnapshot, x: lastValid.x, z: nz },
           floorSnapshot,
           edgesSnapshot,
           othersSnapshot,
         );
-        if (tryX) {
-          applyX = nx;
-        }
-        if (tryZ) {
-          applyZ = nz;
-        }
+        if (tryX.valid) applyX = nx;
+        if (tryZ.valid) applyZ = nz;
+        invalid = !(tryX.valid || tryZ.valid);
       }
       lastValid = { x: applyX, z: applyZ };
+      setLiveInvalid(invalid);
       if (groupRef.current) {
-        // Recompute stack-on-top y for the live position so the item
-        // visually rides on top of whatever it currently overlaps.
         const liveStackY = computeStackY(
           { ...fSnapshot, x: applyX, z: applyZ },
           othersSnapshot,
@@ -245,10 +210,17 @@ export function FurnitureItem({
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
       window.removeEventListener('pointercancel', handleUp);
+      setLiveInvalid(false);
       if (moved) {
         setIsDragging(false);
         onDragEnd();
-        updateFurniture(furniture.id, { x: lastValid.x, z: lastValid.z });
+        const dxFinal = lastValid.x - fSnapshot.x;
+        const dzFinal = lastValid.z - fSnapshot.z;
+        if (isGroupDrag) {
+          translateFurnitures(groupIds, dxFinal, dzFinal);
+        } else {
+          updateFurniture(furniture.id, { x: lastValid.x, z: lastValid.z });
+        }
       }
     };
 
@@ -257,7 +229,6 @@ export function FurnitureItem({
     window.addEventListener('pointercancel', handleUp);
   };
 
-  // ---- Height handle ----
   const onHeightHandlePointerDown = (
     e: React.PointerEvent<HTMLDivElement>,
   ) => {
@@ -268,8 +239,6 @@ export function FurnitureItem({
     const pointerId = e.pointerId;
     onDragStart();
 
-    // Convert screen pixels to world Y meters via camera projection.
-    // Approximation: use canvas pixel ratio at the furniture's location.
     const project = (worldY: number): number => {
       const v = new Vector3(furniture.x, worldY, furniture.z);
       v.project(camera);
@@ -297,7 +266,6 @@ export function FurnitureItem({
     window.addEventListener('pointercancel', handleUp);
   };
 
-  // ---- Resize handles ----
   const onResizeHandlePointerDown = (
     e: React.PointerEvent<HTMLDivElement>,
     corner: Corner,
@@ -363,6 +331,12 @@ export function FurnitureItem({
     window.addEventListener('pointercancel', handleUp);
   };
 
+  const wireColor = liveInvalid
+    ? '#dc2626'
+    : blockerHighlight
+      ? '#f97316'
+      : '#22d3ee';
+
   return (
     <group
       ref={groupRef}
@@ -370,7 +344,7 @@ export function FurnitureItem({
     >
       <ShapeFor furniture={furniture} />
 
-      {isSelected && (
+      {(isSelected || isMultiSelected || liveInvalid || blockerHighlight) && (
         <mesh position={[0, furniture.height / 2, 0]}>
           <boxGeometry
             args={[
@@ -380,10 +354,10 @@ export function FurnitureItem({
             ]}
           />
           <meshBasicMaterial
-            color="#22d3ee"
+            color={wireColor}
             wireframe
             transparent
-            opacity={0.95}
+            opacity={liveInvalid || blockerHighlight ? 1 : 0.95}
           />
         </mesh>
       )}
@@ -395,10 +369,7 @@ export function FurnitureItem({
           zIndexRange={[100, 0]}
           style={{ pointerEvents: 'auto' }}
         >
-          <div
-            className="fpopover"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
+          <div className="fpopover" onPointerDown={(e) => e.stopPropagation()}>
             <span className="fpopover-label">{furniture.label}</span>
             <button
               type="button"

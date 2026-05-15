@@ -1,28 +1,10 @@
-import type { FloorPlan, Furniture, FurnitureType, Vec2 } from './types';
+import type { FloorPlan, Furniture, Vec2 } from './types';
 import { innerEdges, outerEdges, pointInPolygon } from './geometry';
-
-/** Items allowed to overlap floor furniture (chair tucks under, others sit on top). */
-export const STACKABLE_TYPES: ReadonlySet<FurnitureType> = new Set<FurnitureType>([
-  'chair',
-  'microwave',
-  'tv',
-  'coffeeMaker',
-  'toaster',
-]);
-
-/** Stackable items that should be rendered on top of the supporting furniture. */
-export const ON_TOP_TYPES: ReadonlySet<FurnitureType> = new Set<FurnitureType>([
-  'microwave',
-  'tv',
-  'coffeeMaker',
-  'toaster',
-]);
+import { isOnTop, isStackable } from './furnitureRegistry';
 
 function canOverlap(a: Furniture, b: Furniture): boolean {
   // Allow stackable + non-stackable overlap (chair under table, microwave on counter, etc.)
-  const aStack = STACKABLE_TYPES.has(a.type);
-  const bStack = STACKABLE_TYPES.has(b.type);
-  return aStack !== bStack;
+  return isStackable(a.type) !== isStackable(b.type);
 }
 
 export function getFurnitureCorners(f: Furniture): Vec2[] {
@@ -104,16 +86,74 @@ export function precomputeEdges(floor: FloorPlan): PrecomputedEdges {
   };
 }
 
-/** Returns true if two furniture items overlap (considering rotation). */
 export function furnituresOverlap(a: Furniture, b: Furniture): boolean {
   const ca = getFurnitureCorners(a);
   const cb = getFurnitureCorners(b);
-  // Check edges of a against rect b, and edges of b against rect a.
   for (let i = 0; i < 4; i++) {
     if (rectIntersectsSegment(cb, ca[i], ca[(i + 1) % 4])) return true;
     if (rectIntersectsSegment(ca, cb[i], cb[(i + 1) % 4])) return true;
   }
   return false;
+}
+
+export interface PlacementCheck {
+  valid: boolean;
+  /** ids of furniture this candidate collides with (only when invalid) */
+  blockers: string[];
+  /** ref keys of walls (outer-edgeIndex / inner-wallId) the candidate hits */
+  wallHits: string[];
+  /** true if any corner is outside the room */
+  outsideRoom: boolean;
+}
+
+export function checkPlacement(
+  candidate: Furniture,
+  floor: FloorPlan,
+  edges?: PrecomputedEdges,
+  others?: Furniture[],
+): PlacementCheck {
+  const result: PlacementCheck = {
+    valid: true,
+    blockers: [],
+    wallHits: [],
+    outsideRoom: false,
+  };
+  if (floor.outline.length < 3) return result;
+  const corners = getFurnitureCorners(candidate);
+
+  for (const c of corners) {
+    if (!pointInPolygon(c, floor.outline)) {
+      result.outsideRoom = true;
+      result.valid = false;
+      break;
+    }
+  }
+  const outer = edges?.outer ?? outerEdges(floor.outline);
+  const inner = edges?.inner ?? innerEdges(floor.innerWalls);
+  for (const e of outer) {
+    if (rectIntersectsSegment(corners, e.start, e.end)) {
+      const ref = e.ref;
+      if (ref.type === 'outer') result.wallHits.push(`outer:${ref.edgeIndex}`);
+      result.valid = false;
+    }
+  }
+  for (const e of inner) {
+    if (rectIntersectsSegment(corners, e.start, e.end)) {
+      const ref = e.ref;
+      if (ref.type === 'inner') result.wallHits.push(`inner:${ref.wallId}`);
+      result.valid = false;
+    }
+  }
+  if (others) {
+    for (const other of others) {
+      if (canOverlap(candidate, other)) continue;
+      if (furnituresOverlap(candidate, other)) {
+        result.blockers.push(other.id);
+        result.valid = false;
+      }
+    }
+  }
+  return result;
 }
 
 export function isFurniturePlacementValid(
@@ -122,38 +162,40 @@ export function isFurniturePlacementValid(
   edges?: PrecomputedEdges,
   others?: Furniture[],
 ): boolean {
-  if (floor.outline.length < 3) return true;
-  const corners = getFurnitureCorners(candidate);
-
-  for (const c of corners) {
-    if (!pointInPolygon(c, floor.outline)) return false;
-  }
-  const outer = edges?.outer ?? outerEdges(floor.outline);
-  const inner = edges?.inner ?? innerEdges(floor.innerWalls);
-  for (const e of outer) {
-    if (rectIntersectsSegment(corners, e.start, e.end)) return false;
-  }
-  for (const e of inner) {
-    if (rectIntersectsSegment(corners, e.start, e.end)) return false;
-  }
-  if (others) {
-    for (const other of others) {
-      if (canOverlap(candidate, other)) continue;
-      if (furnituresOverlap(candidate, other)) return false;
-    }
-  }
-  return true;
+  return checkPlacement(candidate, floor, edges, others).valid;
 }
 
-/** Returns the top Y of the tallest non-stackable furniture this stackable rests on. 0 if none. */
+/** Returns the top Y of the tallest non-stackable furniture this stackable rests on. */
 export function computeStackY(target: Furniture, others: Furniture[]): number {
-  if (!ON_TOP_TYPES.has(target.type)) return 0;
+  if (!isOnTop(target.type)) return 0;
   let topY = 0;
   for (const o of others) {
-    if (STACKABLE_TYPES.has(o.type)) continue;
+    if (isStackable(o.type)) continue;
     if (furnituresOverlap(target, o)) {
       if (o.height > topY) topY = o.height;
     }
   }
   return topY;
+}
+
+/**
+ * Returns true if the proposed outline is simple (no edge crosses any
+ * non-adjacent edge). Used by the vertex-drag handler to reject moves that
+ * would self-intersect the polygon.
+ */
+export function isOutlineSimple(outline: Vec2[]): boolean {
+  const n = outline.length;
+  if (n < 4) return true;
+  for (let i = 0; i < n; i++) {
+    const a1 = outline[i];
+    const a2 = outline[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      // Skip adjacent edges (sharing a vertex).
+      if (j === i || j === (i + 1) % n || (j + 1) % n === i) continue;
+      const b1 = outline[j];
+      const b2 = outline[(j + 1) % n];
+      if (segmentsIntersect(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
 }
