@@ -7,11 +7,24 @@ import {
   exportSvgElement,
   printCurrentView,
 } from '../lib/exporters';
+import { manualResync, useSyncStatus } from '../lib/syncStrategy';
+import { backendMode, describeBackend } from '../lib/remote';
 import { getSceneRenderer, getSceneRoot } from '../scene/Scene';
 import { getFloorPlanSvg } from '../editor2d/FloorPlanEditor';
 import type { Unit } from '../lib/units';
 
 const GRID_VALUES = [0.05, 0.1, 0.25, 0.5];
+
+function syncLabel(status: string): string {
+  switch (status) {
+    case 'online': return '同期済み';
+    case 'syncing': return '同期中…';
+    case 'offline': return 'オフライン';
+    case 'error': return 'エラー';
+    case 'connecting': return '接続中…';
+    default: return status;
+  }
+}
 const UNIT_VALUES: Unit[] = ['m', 'cm', 'mm'];
 const LOCALE_VALUES: Locale[] = ['ja', 'en'];
 const LIGHTING_VALUES = ['day', 'evening', 'night'] as const;
@@ -55,6 +68,7 @@ export function HeaderControls() {
 
   const { t, locale, setLocale } = useTranslation();
   const { past, future } = useTemporalStateLengths();
+  const sync = useSyncStatus();
 
   const undo = () => useRoomStore.temporal.getState().undo();
   const redo = () => useRoomStore.temporal.getState().redo();
@@ -130,6 +144,20 @@ export function HeaderControls() {
           ↷
         </button>
       </div>
+
+      {/* Sync status badge */}
+      <button
+        type="button"
+        className={`sync-badge sync-${sync.status}`}
+        onClick={() => void manualResync()}
+        title={`${describeBackend()}\n${sync.status}${sync.lastError ? '\n' + sync.lastError : ''}${sync.lastSync ? '\nlast: ' + new Date(sync.lastSync).toLocaleTimeString() : ''}`}
+      >
+        <span className="sync-dot" />
+        <span className="sync-text">
+          {syncLabel(sync.status)}
+          {backendMode === 's3' ? ' · S3' : ''}
+        </span>
+      </button>
 
       {/* Grid + cell + clearance */}
       <div className="header-grid" aria-label={t('header.grid')}>

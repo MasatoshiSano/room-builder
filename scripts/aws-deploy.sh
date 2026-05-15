@@ -144,10 +144,33 @@ else
 fi
 
 echo
-echo "==============================================================="
-echo "Deployed.  Open in your browser:"
-echo "    ${WEBSITE_URL}"
-echo "==============================================================="
+# Optional: invalidate CloudFront cache if a distribution fronts this bucket.
+# Looks for any distribution whose comment matches "room-builder ${BUCKET}"
+# (the same comment used by scripts/aws-https-setup.sh).
+DIST_ID="$(aws cloudfront list-distributions \
+  --query "DistributionList.Items[?Comment=='room-builder ${BUCKET}'].Id" \
+  --output text 2>/dev/null || true)"
+if [ -n "${DIST_ID}" ] && [ "${DIST_ID}" != "None" ]; then
+  echo "[+] CloudFront distribution ${DIST_ID} detected — invalidating /*..."
+  INV_ID="$(aws cloudfront create-invalidation \
+    --distribution-id "${DIST_ID}" \
+    --paths '/*' \
+    --query 'Invalidation.Id' --output text)"
+  DIST_DOMAIN="$(aws cloudfront get-distribution \
+    --id "${DIST_ID}" --query 'Distribution.DomainName' --output text)"
+  echo "    Invalidation ${INV_ID} created."
+  echo
+  echo "==============================================================="
+  echo "Deployed.  Open in your browser:"
+  echo "    https://${DIST_DOMAIN}   (HTTPS via CloudFront)"
+  echo "    ${WEBSITE_URL}            (HTTP — only allowed from ${ALLOW_IP})"
+  echo "==============================================================="
+else
+  echo "==============================================================="
+  echo "Deployed.  Open in your browser:"
+  echo "    ${WEBSITE_URL}"
+  echo "==============================================================="
+fi
 echo
 echo "Notes:"
 echo " - Access is restricted to ${ALLOW_IP}. If your IP changes, re-run"

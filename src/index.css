@@ -1011,6 +1011,51 @@ button { font-family: inherit; }
 .person-view-exit:hover { background: rgba(255, 255, 255, 0.32); }
 
 /* ========================================================================
+   Sync status badge
+   ======================================================================== */
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--hig-fill-2);
+  border: 0.5px solid var(--hig-separator);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--hig-label-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  height: 26px;
+  white-space: nowrap;
+}
+.sync-badge:hover { background: var(--hig-fill-1); }
+.sync-badge:focus-visible { outline: none; box-shadow: var(--hig-focus-ring); }
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hig-gray-2);
+  flex: 0 0 auto;
+}
+.sync-text { font-variant-numeric: tabular-nums; }
+.sync-online .sync-dot { background: var(--hig-green); box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18); }
+.sync-online .sync-text { color: var(--hig-label-primary); }
+.sync-syncing .sync-dot {
+  background: var(--hig-blue);
+  animation: sync-pulse 1.2s ease-in-out infinite;
+}
+.sync-offline .sync-dot { background: var(--hig-gray-1); }
+.sync-offline.sync-badge { color: var(--hig-label-tertiary); }
+.sync-error .sync-dot { background: var(--hig-red); }
+.sync-error.sync-badge { color: var(--hig-red); }
+.sync-connecting .sync-dot { background: var(--hig-orange); animation: sync-pulse 1.2s ease-in-out infinite; }
+@keyframes sync-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.5; }
+}
+
+/* ========================================================================
    Sun azimuth/elevation slider (HIG compact card)
    ======================================================================== */
 

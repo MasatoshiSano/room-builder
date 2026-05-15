@@ -131,7 +131,19 @@ const blobUrlCache = new Map<string, string>();
 export async function getBlobObjectUrl(key: string): Promise<string | null> {
   const cached = blobUrlCache.get(key);
   if (cached) return cached;
-  const blob = await idbGetBlob(key);
+  let blob = await idbGetBlob(key);
+  if (!blob) {
+    // Cache miss → ask the remote backend (server or S3) and warm IDB.
+    try {
+      const { remote } = await import('./remote');
+      blob = await remote.getBlob(key);
+      if (blob) {
+        await idbPutBlob(key, blob).catch(() => null);
+      }
+    } catch {
+      /* offline → return null */
+    }
+  }
   if (!blob) return null;
   const url = URL.createObjectURL(blob);
   blobUrlCache.set(key, url);

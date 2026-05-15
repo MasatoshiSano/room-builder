@@ -50,3 +50,30 @@
 - `@serendie/ui` 3.x + `@serendie/symbols` — UI コンポーネント（タブ・ボタン・テキストフィールド）
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## AWS デプロイ
+
+ローカル → S3 (データ) → S3 静的サイト (HTTP) → CloudFront (HTTPS) の順に
+セットアップ。すべて scripts/ の冪等シェルスクリプト。
+
+```bash
+# 1) データ用バケット (CORS + 推奨IAM policy 出力)
+bash scripts/aws-setup.sh
+
+# 2) 静的サイトバケット作成 + dist/ を sync (要 IP 制限あり)
+npm run build
+bash scripts/aws-deploy.sh
+# → http://room-builder-app-<account>.s3-website-ap-northeast-1.amazonaws.com
+
+# 3) CloudFront + WAF で HTTPS 化
+bash scripts/aws-https-setup.sh
+# → https://<dist>.cloudfront.net  (~5-10 分待ち)
+# 以後 aws-deploy.sh は CloudFront キャッシュ無効化も自動実行
+```
+
+IP は curl https://checkip.amazonaws.com で自動取得。`RB_IP=...` で上書き可。
+
+### 環境変数 (.env)
+
+`server` モード (default): VITE_BACKEND_MODE=server (ローカル Hono+SQLite)
+`s3` モード: VITE_BACKEND_MODE=s3 + VITE_AWS_REGION/BUCKET/ACCESS_KEY_ID/SECRET

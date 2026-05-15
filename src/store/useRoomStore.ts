@@ -798,12 +798,12 @@ export const useRoomStore = create<RoomStore>()(
 
         setBackgroundImage: (img) =>
           set((s) => {
-            // Old image used a blob key? Revoke and delete.
             const old = s.floor.backgroundImage;
             if (old?.src.startsWith('blob-key:')) {
               const key = old.src.slice('blob-key:'.length);
               revokeBlobObjectUrl(key);
               void idbDeleteBlob(key);
+              void withSync(() => remote.deleteBlob(key));
             }
             return { floor: { ...s.floor, backgroundImage: img } };
           }),
@@ -818,11 +818,14 @@ export const useRoomStore = create<RoomStore>()(
             });
             return;
           }
+          // Mirror to remote (best-effort; sync layer manages status).
+          void withSync(() => remote.putBlob(key, blob));
           const cur = useRoomStore.getState().floor.backgroundImage;
           if (cur?.src.startsWith('blob-key:')) {
             const oldKey = cur.src.slice('blob-key:'.length);
             revokeBlobObjectUrl(oldKey);
             void idbDeleteBlob(oldKey);
+            void withSync(() => remote.deleteBlob(oldKey));
           }
           useRoomStore.setState((s) => ({
             floor: {
@@ -1119,12 +1122,12 @@ export const useRoomStore = create<RoomStore>()(
         setPersonPlacing: (v) => set({ personPlacing: v }),
         setDraggingFurnitureType: (t) => set({ draggingFurnitureType: t }),
         resetAll: () => {
-          // Clean up any background blob first.
           const cur = get().floor.backgroundImage;
           if (cur?.src.startsWith('blob-key:')) {
             const key = cur.src.slice('blob-key:'.length);
             revokeBlobObjectUrl(key);
             void idbDeleteBlob(key);
+            void withSync(() => remote.deleteBlob(key));
           }
           set({
             floor: DEFAULT_FLOOR,
