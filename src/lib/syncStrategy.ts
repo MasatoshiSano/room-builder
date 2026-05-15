@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import { ServerError, serverClient, type ServerPlan } from './serverClient';
+import { ServerError, type ServerPlan } from './serverClient';
+import { remote } from './remote';
 
 /** Public sync state surface for UI badges. */
 export type SyncStatus =
@@ -46,7 +47,7 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 async function probe(): Promise<boolean> {
   try {
-    await serverClient.health();
+    await remote.health();
     state.probed = true;
     if (state.status !== 'syncing') setStatus({ status: 'online', lastError: null });
     else state.lastError = null;
@@ -130,7 +131,7 @@ export function useSyncStatus(): InternalState {
 export async function pullState<T>(): Promise<T | null> {
   try {
     setStatus({ status: 'syncing' });
-    const r = await serverClient.getState<T>();
+    const r = await remote.getState<T>();
     setStatus({ status: 'online', lastSync: Date.now(), lastError: null });
     return r;
   } catch (e) {
@@ -146,7 +147,7 @@ export async function pullState<T>(): Promise<T | null> {
 export async function pullPlans(): Promise<ServerPlan[] | null> {
   try {
     setStatus({ status: 'syncing' });
-    const list = await serverClient.listPlans();
+    const list = await remote.listPlans();
     setStatus({ status: 'online', lastSync: Date.now(), lastError: null });
     return list;
   } catch (e) {

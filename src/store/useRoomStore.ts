@@ -35,7 +35,7 @@ import {
   idbPutState,
   revokeBlobObjectUrl,
 } from '../lib/persistence';
-import { serverClient } from '../lib/serverClient';
+import { remote } from '../lib/remote';
 import {
   isOnline,
   pullPlans,
@@ -1434,20 +1434,20 @@ async function hydrateInitial(): Promise<void> {
   //    local has data, push local up.
   if (camefromServer === false && isOnline()) {
     const local = useRoomStore.getState();
-    const remoteState = await serverClient.getState<PersistedState>().catch(() => null);
+    const remoteState = await remote.getState<PersistedState>().catch(() => null);
     if (remoteState === null) {
       const payload: PersistedState = {
         version: STATE_SCHEMA_VERSION,
         floor: local.floor,
         furniture: local.furniture,
       };
-      await withSync(() => serverClient.putState(payload));
+      await withSync(() => remote.putState(payload));
     }
     if (local.savedPlans.length > 0) {
-      const remotePlans = await serverClient.listPlans().catch(() => null);
+      const remotePlans = await remote.listPlans().catch(() => null);
       if (remotePlans !== null && remotePlans.length === 0) {
         await withSync(() =>
-          serverClient.replaceAllPlans(
+          remote.replaceAllPlans(
             local.savedPlans.map((p) => ({
               id: p.id,
               name: p.name,
@@ -1481,7 +1481,7 @@ function flushPersistNow(state: PersistedState): void {
       });
     });
     // 2) Server (best-effort; sync layer manages status).
-    void withSync(() => serverClient.putState(state));
+    void withSync(() => remote.putState(state));
     if (useRoomStore.getState().persistError !== null) {
       useRoomStore.setState({ persistError: null });
     }
@@ -1511,7 +1511,7 @@ async function persistPlans(plans: SavedPlan[]): Promise<void> {
   }
   // Mirror plans to the server (best-effort).
   void withSync(() =>
-    serverClient.replaceAllPlans(
+    remote.replaceAllPlans(
       plans.map((p) => ({
         id: p.id,
         name: p.name,
