@@ -6,3 +6,4 @@ dist
 *.tsbuildinfo
 .omc
 .playwright-mcp
+qa-*.png
